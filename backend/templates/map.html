@@ -199,7 +199,7 @@
             } catch (e) {
                 setStatus("Geolocation denied — trying IP-based location...");
                 try {
-                    var resp = await fetch("https://ipapi.co/json/");
+                    var resp = await fetch("https://ipwho.is/");
                     var ipData = await resp.json();
                     var ipLat = parseFloat(ipData.latitude);
                     var ipLon = parseFloat(ipData.longitude);

@@ -17,7 +17,7 @@ interface AppState {
 const AppContext = createContext<AppState | null>(null);
 
 export function Providers({ children }: { children: ReactNode }) {
-  const [apiUrl, setApiUrl] = useState('http://localhost:5000');
+  const [apiUrl, setApiUrl] = useState('https://netrange-backend.onrender.com');
   const [currentLocation, setCurrentLocation] = useState<Location.LocationObjectCoords | null>(null);
   const [deviceId, setDeviceId] = useState('');
   const [isOnline, setIsOnline] = useState(true);

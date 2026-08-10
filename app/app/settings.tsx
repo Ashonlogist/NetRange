@@ -61,11 +61,11 @@ export default function SettingsScreen() {
           label="API Base URL"
           value={apiUrl}
           onChangeText={setApiUrl}
-          placeholder="http://localhost:5000"
+          placeholder="https://netrange-backend.onrender.com"
           keyboardType="default"
         />
         <Text style={styles.helpText}>
-          Your Flask backend URL. Use LAN IP (e.g., 192.168.x.x:5000) for phone access.
+          Your backend URL. The default is the hosted Render backend; use a LAN IP (e.g., 192.168.x.x:5000) only if running locally.
         </Text>
       </Card>
 
