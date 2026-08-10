@@ -197,6 +197,7 @@
                 map.setView([pos.coords.latitude, pos.coords.longitude], 16);
                 setStatus("Location found: " + pos.coords.latitude.toFixed(4) + ", " + pos.coords.longitude.toFixed(4));
             } catch (e) {
+                console.error('geolocation error:', e);
                 setStatus("Geolocation denied — trying IP-based location...");
                 try {
                     var resp = await fetch("https://ipwho.is/");
@@ -212,7 +213,8 @@
                         setStatus("Could not determine location — enter coordinates manually");
                     }
                 } catch (ipErr) {
-                    setStatus("Could not determine location — enter coordinates manually");
+                    console.error('IP location error:', ipErr);
+                    setStatus("Could not determine location — " + (ipErr && ipErr.message ? ipErr.message : "IP lookup failed") + ". Check internet and retry.");
                 }
             }
         }
