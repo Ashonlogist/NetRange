@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WiFi Coverage Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a2e; color: #eee; display: flex; height: 100vh; overflow: hidden; }
+        #sidebar { width: 340px; background: #16213e; padding: 16px; overflow-y: auto; flex-shrink: 0; border-right: 1px solid #0f3460; }
+        #sidebar h1 { font-size: 1.3em; color: #e94560; margin-bottom: 4px; }
+        #sidebar h1 small { font-size: 0.6em; color: #888; font-weight: normal; }
+        #sidebar h2 { font-size: 0.95em; color: #e94560; margin: 14px 0 6px; border-bottom: 1px solid #0f3460; padding-bottom: 4px; }
+        .form-group { margin-bottom: 8px; }
+        .form-group label { display: block; font-size: 0.75em; color: #aaa; margin-bottom: 2px; }
+        .form-group input, .form-group select { width: 100%; padding: 6px 8px; border: 1px solid #0f3460; border-radius: 4px; background: #1a1a2e; color: #eee; font-size: 0.9em; }
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em; font-weight: bold; margin: 3px 2px; }
+        .btn-scan { background: #e94560; color: white; width: 100%; padding: 10px; font-size: 1em; margin-top: 8px; }
+        .btn-scan:hover { background: #c73652; }
+        .btn-clear { background: #0f3460; color: #eee; width: 100%; margin-top: 4px; }
+        .btn-clear:hover { background: #1a4a8a; }
+        .btn-auto { background: #0f3460; color: #eee; width: 100%; margin-top: 4px; border: 1px solid #e94560; }
+        .btn-auto:hover { background: #1a4a8a; }
+        .btn-coverage { background: #1a6b3c; color: white; width: 100%; padding: 10px; font-size: 1em; margin-top: 8px; }
+        .btn-coverage:hover { background: #145a2e; }
+        #map { flex: 1; }
+        #scan-results { margin-top: 10px; max-height: 200px; overflow-y: auto; }
+        .scan-entry { padding: 5px 8px; margin-bottom: 3px; background: #0f3460; border-radius: 4px; font-size: 0.78em; display: flex; justify-content: space-between; align-items: center; }
+        .scan-entry .ssid { font-weight: bold; color: #e94560; }
+        .scan-entry .rssi { font-weight: bold; }
+        .scan-entry .rssi.weak { color: #f44; }
+        .scan-entry .rssi.fair { color: #fa0; }
+        .scan-entry .rssi.good { color: #ff0; }
+        .scan-entry .rssi.excellent { color: #0f0; }
+        .stats { font-size: 0.78em; color: #aaa; margin-top: 6px; }
+        .legend { margin-top: 10px; padding: 8px; background: #0f3460; border-radius: 4px; font-size: 0.72em; }
+        .legend-bar { height: 12px; border-radius: 3px; margin: 4px 0; }
+        #status { font-size: 0.78em; color: #aaa; margin-top: 8px; padding: 6px; background: #0f3460; border-radius: 4px; min-height: 1.5em; }
+        .target-info { background: #0f3460; padding: 8px; border-radius: 4px; margin-bottom: 8px; font-size: 0.8em; }
+        .target-info .target-ssid { color: #e94560; font-weight: bold; font-size: 1.1em; }
+        .target-info .target-detail { color: #aaa; font-size: 0.85em; margin-top: 2px; }
+        .coverage-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75em; font-weight: bold; }
+        .coverage-badge.excellent { background: #0a3d0a; color: #0f0; }
+        .coverage-badge.good { background: #3d3d0a; color: #ff0; }
+        .coverage-badge.fair { background: #3d1a0a; color: #fa0; }
+        .coverage-badge.weak { background: #3d0a0a; color: #f44; }
+        #coverage-summary { margin-top: 8px; padding: 8px; background: #0f3460; border-radius: 4px; font-size: 0.78em; }
+        #coverage-stats { margin-top: 6px; padding: 8px; background: #0f3460; border-radius: 4px; font-size: 0.78em; }
+        .coverage-stat { display: flex; justify-content: space-between; margin: 2px 0; }
+        .coverage-stat .label { color: #aaa; }
+        .coverage-stat .value { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <h1>&#128268; WiFi Coverage <small>Mapper</small></h1>
+
+<div class="target-info" id="targetInfo">
+            <div class="target-ssid" id="targetSsid">Detecting server network...</div>
+            <div class="target-detail" id="targetDetail">⚠️ This shows the <strong>server's</strong> WiFi. If accessing remotely, enter your network SSID manually below.</div>
+        </div>
+
+        <h2>Location</h2>
+        <div class="form-group">
+            <label>Latitude</label>
+            <input type="number" id="lat" step="any" placeholder="e.g. 6.5244">
+        </div>
+        <div class="form-group">
+            <label>Longitude</label>
+            <input type="number" id="lon" step="any" placeholder="e.g. 3.3792">
+        </div>
+        <button class="btn btn-auto" onclick="autoLocation()">&#128205; Auto-detect Location</button>
+
+        <h2>Target Network</h2>
+        <div class="form-group">
+            <label>SSID (type or pick from scan)</label>
+            <input type="text" id="targetSsidFilter" placeholder="e.g. STUDENT">
+        </div>
+        <button class="btn btn-auto" onclick="scanNetworks()">📡 Scan Available Networks</button>
+        <div id="networkList" style="display:none; margin-top:8px;"></div>
+
+        <button class="btn btn-scan" onclick="doScan()">Scan WiFi at This Location</button>
+
+        <h2>Coverage Map</h2>
+        <button class="btn btn-coverage" onclick="generateCoverage()">Generate Coverage Map</button>
+        <button class="btn btn-clear" onclick="clearCoverage()">Clear Coverage</button>
+
+        <div id="status">Ready</div>
+        <div class="stats" id="stats"></div>
+        <div id="coverage-summary"></div>
+        <div id="coverage-stats"></div>
+
+        <h2>Scan Log</h2>
+        <div id="scan-results"></div>
+
+        <div class="legend">
+            <strong>Signal Strength</strong>
+            <div class="legend-bar" style="background: linear-gradient(to right, #f44, #fa0, #ff0, #0f0);"></div>
+            <span>Weak (-80)</span> &rarr; <span>Excellent (-30)</span> dBm
+        </div>
+    </div>
+    <div id="map"></div>
+
+    <script>
+        // Global error handler
+        window.addEventListener('error', function(e) {
+            console.error('Global error:', e.message, e.filename, e.lineno);
+            setStatus('Error: ' + e.message);
+        });
+        window.addEventListener('unhandledrejection', function(e) {
+            console.error('Unhandled rejection:', e.reason);
+            setStatus('Async error: ' + e.reason);
+        });
+
+        var map;
+        var heatmap;
+        var coverageLayer;
+        var markers = [];
+        var targetSsid = null;
+
+        function initMap() {
+            console.log('initMap called');
+            try {
+                map = L.map("map").setView([0, 0], 2);
+                console.log('Map created');
+                L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                    attribution: "&copy; OpenStreetMap",
+                    maxZoom: 19,
+                }).addTo(map);
+                console.log('Tile layer added');
+                
+                if (typeof L.heatLayer === 'undefined') {
+                    throw new Error('L.heatLayer not found - leaflet.heat plugin not loaded');
+                }
+                console.log('L.heatLayer available');
+                
+                heatmap = L.heatLayer([], { radius: 30, blur: 20, maxZoom: 18, max: 1.0 }).addTo(map);
+                console.log('Heatmap layer created');
+                coverageLayer = null;
+                detectCurrentNetwork();
+            } catch (e) {
+                console.error('initMap error:', e);
+                setStatus('Map init failed: ' + e.message);
+            }
+        }
+
+        function setStatus(msg) {
+            document.getElementById("status").textContent = msg;
+        }
+
+        function setTargetInfo(ssid, count, avgDbm) {
+            document.getElementById("targetSsid").textContent = ssid || "No target";
+            var detail = "Not scanning";
+            if (ssid) {
+                var strength = avgDbm > -50 ? "excellent" : avgDbm > -60 ? "good" : avgDbm > -70 ? "fair" : "weak";
+                detail = count + " readings &middot; avg " + avgDbm + " dBm &middot; " + strength;
+            }
+            document.getElementById("targetDetail").textContent = detail;
+        }
+
+        async function detectCurrentNetwork() {
+            console.log('detectCurrentNetwork called');
+            try {
+                var resp = await fetch("/api/current");
+                console.log('/api/current response:', resp.status);
+                var data = await resp.json();
+                console.log('/api/current data:', data);
+                if (data.connected && data.ssid) {
+                    document.getElementById("targetSsidFilter").value = data.ssid;
+                    targetSsid = data.ssid;
+                    setTargetInfo(data.ssid, 0, 0);
+                    setStatus("Server is on " + data.ssid + " — if this is YOUR network, great! Otherwise, type your SSID below.");
+                } else {
+                    setStatus("Server not on WiFi — enter your network SSID manually");
+                }
+            } catch (e) {
+                console.error('detectCurrentNetwork error:', e);
+                setStatus('Network detection failed: ' + e.message);
+            }
+        }
+
+        async function autoLocation() {
+            if (!navigator.geolocation) {
+                setStatus("Geolocation is not supported by your browser");
+                return;
+            }
+            setStatus("Getting your location...");
+            try {
+                var pos = await new Promise(function(resolve, reject) {
+                    navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 });
+                });
+                document.getElementById("lat").value = pos.coords.latitude;
+                document.getElementById("lon").value = pos.coords.longitude;
+                map.setView([pos.coords.latitude, pos.coords.longitude], 16);
+                setStatus("Location found: " + pos.coords.latitude.toFixed(4) + ", " + pos.coords.longitude.toFixed(4));
+            } catch (e) {
+                setStatus("Geolocation denied — trying IP-based location...");
+                try {
+                    var resp = await fetch("https://ipapi.co/json/");
+                    var ipData = await resp.json();
+                    var ipLat = parseFloat(ipData.latitude);
+                    var ipLon = parseFloat(ipData.longitude);
+                    if (!isNaN(ipLat) && !isNaN(ipLon)) {
+                        document.getElementById("lat").value = ipLat;
+                        document.getElementById("lon").value = ipLon;
+                        map.setView([ipLat, ipLon], 16);
+                        setStatus("Location from IP: " + ipLat.toFixed(4) + ", " + ipLon.toFixed(4) + " (approximate)");
+                    } else {
+                        setStatus("Could not determine location — enter coordinates manually");
+                    }
+                } catch (ipErr) {
+                    setStatus("Could not determine location — enter coordinates manually");
+                }
+            }
+        }
+
+        async function doScan() {
+            console.log('doScan called');
+            var lat = parseFloat(document.getElementById("lat").value);
+            var lon = parseFloat(document.getElementById("lon").value);
+            var filterSsid = document.getElementById("targetSsidFilter").value.trim();
+
+            if (isNaN(lat) || isNaN(lon)) {
+                setStatus("Enter valid latitude and longitude, or click Auto-detect Location");
+                return;
+            }
+
+            targetSsid = filterSsid || null;
+            setStatus("Scanning for WiFi networks...");
+
+            try {
+                var url = "/api/scan?lat=" + lat + "&lon=" + lon + (filterSsid ? "&ssid=" + encodeURIComponent(filterSsid) : "");
+                console.log('Scan URL:', url);
+                var resp = await fetch(url);
+                console.log('Scan response:', resp.status);
+                var data = await resp.json();
+                console.log('Scan data:', data);
+
+                if (data.networks.length === 0) {
+                    setStatus("No networks found at this location" + (filterSsid ? " for SSID '" + filterSsid + "'" : ""));
+                    return;
+                }
+
+                var primary = data.networks[0];
+                var ssid = primary.ssid || "(hidden)";
+                var dbm = primary.signal_dbm;
+                var strength = dbm > -50 ? "excellent" : dbm > -60 ? "good" : dbm > -70 ? "fair" : "weak";
+
+                setTargetInfo(ssid, data.count, dbm);
+                setStatus("Scanned " + data.count + " network(s) at (" + lat.toFixed(4) + ", " + lon.toFixed(4) + ") &mdash; " + ssid + " " + dbm + " dBm (" + strength + ")");
+                document.getElementById("stats").textContent = "Total scans: " + data.totalScans;
+
+                displayResults(data.networks);
+                addMarker(lat, lon, dbm, ssid, strength);
+            } catch (e) {
+                console.error('doScan error:', e);
+                setStatus("Scan failed: " + e.message);
+            }
+        }
+
+        function addMarker(lat, lon, dbm, ssid, strength) {
+            var color = strength === "excellent" ? "#0f0" : strength === "good" ? "#ff0" : strength === "fair" ? "#fa0" : "#f44";
+            var icon = L.divIcon({
+                className: "",
+                html: '<div style="width:14px;height:14px;background:' + color + ';border-radius:50%;border:2px solid #fff;box-shadow:0 0 6px ' + color + ';"></div>',
+                iconSize: [14, 14],
+                iconAnchor: [7, 7],
+            });
+            var marker = L.marker([lat, lon], { icon: icon }).addTo(map);
+            marker.bindPopup("<b>" + (ssid || "(hidden)") + "</b><br>" + dbm + " dBm<br>(" + lat.toFixed(4) + ", " + lon.toFixed(4) + ")");
+            markers.push(marker);
+        }
+
+        function displayResults(networks) {
+            var container = document.getElementById("scan-results");
+            container.innerHTML = "";
+            networks.forEach(function(n) {
+                var div = document.createElement("div");
+                div.className = "scan-entry";
+                var rssiClass = n.signal_dbm > -50 ? "excellent" : n.signal_dbm > -60 ? "good" : n.signal_dbm > -70 ? "fair" : "weak";
+                div.innerHTML = '<span class="ssid">' + (n.ssid || "(hidden)") + '</span><span class="rssi ' + rssiClass + '">' + n.signal_dbm + ' dBm</span>';
+                container.appendChild(div);
+            });
+        }
+
+        async function generateCoverage() {
+            console.log('generateCoverage called');
+            var filterSsid = document.getElementById("targetSsidFilter").value.trim();
+            setStatus("Generating coverage map — this may take a moment...");
+
+            try {
+                var url = "/api/coverage?ssid=" + encodeURIComponent(filterSsid) + "&step=0.00005&power=2&radius=0.005";
+                console.log('Coverage URL:', url);
+                var resp = await fetch(url);
+                console.log('Coverage response:', resp.status);
+                var data = await resp.json();
+                console.log('Coverage data:', data);
+
+                if (data.grid.length === 0) {
+                    setStatus(data.message || "No data for coverage map");
+                    return;
+                }
+
+                var grid = data.grid;
+                var points = grid.map(function(p) { return [p.lat, p.lng, p.weight]; });
+
+                if (heatmap) {
+                    map.removeLayer(heatmap);
+                }
+                heatmap = L.heatLayer(points, { radius: 35, blur: 25, maxZoom: 18, max: 1.0 }).addTo(map);
+
+                if (points.length > 0) {
+                    var bounds = L.latLngBounds(points.map(function(p) { return [p[0], p[1]]; }));
+                    map.fitBounds(bounds, { padding: [50, 50] });
+                }
+
+                var stats = data.stats || {};
+                var excellent = 0, good = 0, fair = 0, weak = 0;
+                grid.forEach(function(p) {
+                    if (p.signal_dbm > -50) excellent++;
+                    else if (p.signal_dbm > -60) good++;
+                    else if (p.signal_dbm > -70) fair++;
+                    else weak++;
+                });
+                var total = grid.length;
+
+                document.getElementById("coverage-stats").innerHTML =
+                    '<strong>Coverage Statistics</strong><br>' +
+                    '<div class="coverage-stat"><span class="label">Grid points:</span><span class="value">' + total + '</span></div>' +
+                    '<div class="coverage-stat"><span class="label">Min signal:</span><span class="value">' + stats.min + ' dBm</span></div>' +
+                    '<div class="coverage-stat"><span class="label">Max signal:</span><span class="value">' + stats.max + ' dBm</span></div>' +
+                    '<div class="coverage-stat"><span class="label">Avg signal:</span><span class="value">' + stats.avg + ' dBm</span></div>' +
+                    '<div class="coverage-stat"><span class="label">Excellent:</span><span class="value">' + Math.round(excellent/total*100) + '%</span></div>' +
+                    '<div class="coverage-stat"><span class="label">Good:</span><span class="value">' + Math.round(good/total*100) + '%</span></div>' +
+                    '<div class="coverage-stat"><span class="label">Fair:</span><span class="value">' + Math.round(fair/total*100) + '%</span></div>' +
+                    '<div class="coverage-stat"><span class="label">Weak:</span><span class="value">' + Math.round(weak/total*100) + '%</span></div>';
+
+                document.getElementById("coverage-summary").innerHTML =
+                    '<span class="coverage-badge excellent">' + excellent + ' excellent</span> ' +
+                    '<span class="coverage-badge good">' + good + ' good</span> ' +
+                    '<span class="coverage-badge fair">' + fair + ' fair</span> ' +
+                    '<span class="coverage-badge weak">' + weak + ' weak</span>';
+
+                setStatus("Coverage map generated — " + total + " interpolated points");
+            } catch (e) {
+                console.error('generateCoverage error:', e);
+                setStatus("Coverage generation failed: " + e.message);
+            }
+        }
+
+        function clearCoverage() {
+            if (heatmap) {
+                map.removeLayer(heatmap);
+            }
+            heatmap = L.heatLayer([], { radius: 30, blur: 20, maxZoom: 18, max: 1.0 }).addTo(map);
+            markers.forEach(function(m) { map.removeLayer(m); });
+            markers = [];
+            document.getElementById("scan-results").innerHTML = "";
+            document.getElementById("stats").textContent = "";
+            document.getElementById("coverage-summary").innerHTML = "";
+            document.getElementById("coverage-stats").innerHTML = "";
+            setTargetInfo(null, 0, 0);
+            setStatus("Coverage map cleared");
+        }
+
+        async function loadCoverage() {
+            console.log('loadCoverage called');
+            var filterSsid = document.getElementById("targetSsidFilter").value.trim();
+            try {
+                var url = "/api/coverage?ssid=" + encodeURIComponent(filterSsid) + "&step=0.00005&power=2&radius=0.005";
+                console.log('Load coverage URL:', url);
+                var resp = await fetch(url);
+                console.log('Load coverage response:', resp.status);
+                var data = await resp.json();
+                console.log('Load coverage data:', data);
+                if (data.grid && data.grid.length > 0) {
+                    var points = data.grid.map(function(p) { return [p.lat, p.lng, p.weight]; });
+                    map.removeLayer(heatmap);
+                    heatmap = L.heatLayer(points, { radius: 35, blur: 25, maxZoom: 18, max: 1.0 }).addTo(map);
+                    var bounds = L.latLngBounds(points.map(function(p) { return [p[0], p[1]]; }));
+                    map.fitBounds(bounds, { padding: [50, 50] });
+                    setStatus("Coverage loaded — " + data.grid.length + " points");
+                }
+            } catch (e) {
+                console.error('loadCoverage error:', e);
+                setStatus("Failed to load coverage: " + e.message);
+            }
+        }
+
+        async function scanNetworks() {
+            console.log('scanNetworks called');
+            setStatus("Scanning for available networks...");
+            var container = document.getElementById("networkList");
+            container.style.display = "block";
+            container.innerHTML = "Scanning...";
+
+            try {
+                var resp = await fetch("/api/networks");
+                console.log('/api/networks response:', resp.status);
+                var data = await resp.json();
+                console.log('Networks:', data);
+
+                if (!data.networks || data.networks.length === 0) {
+                    container.innerHTML = "No networks found";
+                    setStatus("No networks found");
+                    return;
+                }
+
+                var html = '<strong>Available Networks (click to select):</strong><br>';
+                data.networks.forEach(function(n) {
+                    var strength = n.signal_dbm > -50 ? "excellent" : n.signal_dbm > -60 ? "good" : n.signal_dbm > -70 ? "fair" : "weak";
+                    html += '<div style="padding:6px; margin:3px 0; background:#0f3460; border-radius:4px; cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="selectNetwork(\'' + (n.ssid || 'hidden').replace(/'/g, "\\'") + '\')">';
+                    html += '<span class="ssid">' + (n.ssid || '(hidden)') + '</span>';
+                    html += '<span class="rssi ' + strength + '">' + n.signal_dbm + ' dBm</span>';
+                    html += '</div>';
+                });
+                container.innerHTML = html;
+                setStatus("Found " + data.networks.length + " networks — click one to select");
+            } catch (e) {
+                console.error('scanNetworks error:', e);
+                container.innerHTML = "Scan failed: " + e.message;
+                setStatus("Network scan failed: " + e.message);
+            }
+        }
+
+        function selectNetwork(ssid) {
+            document.getElementById("targetSsidFilter").value = ssid;
+            document.getElementById("networkList").style.display = "none";
+            setStatus("Target set to: " + ssid);
+        }
+    </script>
+</body>
+</html>

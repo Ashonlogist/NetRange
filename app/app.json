@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "WiFi Mapper",
+    "slug": "wifi-mapper",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a1a2e"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "WiFi Mapper needs location to map signal strength",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "WiFi Mapper needs location to map signal strength"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1a1a2e"
+      },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_WIFI_STATE",
+        "CHANGE_WIFI_STATE",
+        "ACCESS_NETWORK_STATE",
+        "READ_PHONE_STATE"
+      ],
+      "package": "com.ashonlogist.wifimapper"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-location"
+    ],
+    "scheme": "wifimapper",
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "wifi-mapper"
+      }
+    }
+  }
+}
