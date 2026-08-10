@@ -229,7 +229,12 @@
                 setStatus("Location found: " + lat.toFixed(5) + ", " + lon.toFixed(5) + accTxt + (acc > 150 ? " \u2014 rough, move around for a better GPS fix" : ""));
             } catch (e) {
                 console.error('geolocation error:', e);
-                setStatus("GPS unavailable \u2014 trying IP-based location (city-level, not exact)...");
+                var gcode = e && e.code;
+                var greason = gcode === 1 ? "location permission denied" :
+                             gcode === 2 ? "position unavailable (GPS off or indoors)" :
+                             gcode === 3 ? "timed out getting GPS" :
+                             (e && e.message ? e.message : "unknown error");
+                setStatus("GPS failed (" + greason + ") — trying IP-based location (city-level, not exact)...");
                 try {
                     var resp = await fetch("https://ipwho.is/");
                     var ipData = await resp.json();
