@@ -52,6 +52,7 @@
         .coverage-stat { display: flex; justify-content: space-between; margin: 2px 0; }
         .coverage-stat .label { color: #aaa; }
         .coverage-stat .value { font-weight: bold; }
+        .no-data-banner { margin: 10px 0; padding: 10px; background: #3d2a0a; border: 1px solid #e94560; border-radius: 6px; font-size: 0.75em; line-height: 1.5; color: #ffd9a0; }
 
         @media (max-width: 900px) {
             body { flex-direction: column; overflow-y: auto; height: 100vh; }
@@ -69,6 +70,10 @@
 <body>
     <div id="sidebar">
         <h1>&#128268; WiFi Coverage <small>Mapper</small></h1>
+
+        <div class="no-data-banner" id="noDataBanner">
+            <strong>This website can't scan WiFi</strong> (browsers are blocked from it). To collect data, install the <strong>NetRange app</strong> on your phone via Expo Go — scans sync here automatically. Then pick your network's SSID and tap Generate Coverage Map.
+        </div>
 
 <div class="target-info" id="targetInfo">
             <div class="target-ssid" id="targetSsid">Detecting server network...</div>
@@ -307,7 +312,7 @@
                 console.log('Scan data:', data);
 
                 if (data.networks.length === 0) {
-                    setStatus("No networks found at this location" + (filterSsid ? " for SSID '" + filterSsid + "'" : ""));
+                    setStatus(data.message || ("No networks found at this location" + (filterSsid ? " for SSID '" + filterSsid + "'" : "")));
                     return;
                 }
 
@@ -368,6 +373,9 @@
 
                 if (data.grid.length === 0) {
                     setStatus(data.message || "No data for coverage map");
+                    document.getElementById("coverage-summary").innerHTML =
+                        '<strong>No coverage data yet</strong><br>' + (data.message || "") +
+                        '<br>This website cannot scan WiFi. Collect scans with the <strong>NetRange phone app</strong> (Expo Go), then try again.';
                     return;
                 }
 
