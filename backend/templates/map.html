@@ -433,6 +433,12 @@
             document.getElementById("networkList").style.display = "none";
             setStatus("Target set to: " + ssid);
         }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initMap);
+        } else {
+            initMap();
+        }
     </script>
 </body>
 </html>
