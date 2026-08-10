@@ -3,10 +3,13 @@ import json
 import os
 import re
 import math
+import shutil
 from datetime import datetime, timezone
 
 
 INTERFACE = "wlp3s0"
+
+NMCLI = shutil.which("nmcli")
 
 
 def split_terse(line):
@@ -29,10 +32,17 @@ def split_terse(line):
 
 
 def scan():
-    result = subprocess.run(
-        ["nmcli", "-t", "-f", "SSID,BSSID,SIGNAL,CHAN,ACTIVE", "device", "wifi", "list"],
-        capture_output=True, text=True, timeout=15,
-    )
+    if not NMCLI:
+        return []
+    try:
+        result = subprocess.run(
+            ["nmcli", "-t", "-f", "SSID,BSSID,SIGNAL,CHAN,ACTIVE", "device", "wifi", "list"],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode != 0:
+        return []
     networks = []
     for line in result.stdout.strip().split("\n"):
         if not line.strip():
@@ -140,10 +150,15 @@ def idw_interpolate(scans, ssid_filter=None, grid_step=0.0001, power=2, max_radi
 
 
 def get_current_connection():
-    result = subprocess.run(
-        ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
-        capture_output=True, text=True, timeout=10,
-    )
+    if not NMCLI:
+        return {"ssid": None, "uuid": None, "device": None, "connected": False}
+    try:
+        result = subprocess.run(
+            ["nmcli", "-t", "-f", "NAME,UUID,TYPE,DEVICE", "connection", "show", "--active"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return {"ssid": None, "uuid": None, "device": None, "connected": False}
     for line in result.stdout.strip().split("\n"):
         if not line.strip():
             continue

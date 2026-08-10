@@ -29,7 +29,12 @@ def api_scan():
         networks = [n for n in networks if n.get("ssid", "").lower() == ssid_filter]
     count = save_scan(networks, SCANS_FILE)
     total = len(load_scans(SCANS_FILE))
-    return jsonify({"count": count, "totalScans": total, "networks": networks})
+    return jsonify({
+        "count": count,
+        "totalScans": total,
+        "networks": networks,
+        "message": None if networks else "Server-side scanning requires the laptop's WiFi (nmcli). Use the phone app to scan.",
+    })
 
 
 @app.route("/api/scans", methods=["GET"])
@@ -89,7 +94,10 @@ def api_current():
 def api_networks():
     networks = scan()
     networks.sort(key=lambda n: n.get("signal_dbm", -100), reverse=True)
-    return jsonify({"networks": networks})
+    return jsonify({
+        "networks": networks,
+        "message": None if networks else "Server-side scanning requires the laptop's WiFi (nmcli). Use the phone app to scan.",
+    })
 
 
 @app.route("/api/coverage", methods=["GET"])

@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WiFi Coverage Map</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <link rel="stylesheet" href="/static/vendor/leaflet.css" />
+    <script src="/static/vendor/leaflet.js"></script>
+    <script src="/static/vendor/leaflet-heat.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a2e; color: #eee; display: flex; height: 100vh; overflow: hidden; }
@@ -406,8 +406,8 @@
                 console.log('Networks:', data);
 
                 if (!data.networks || data.networks.length === 0) {
-                    container.innerHTML = "No networks found";
-                    setStatus("No networks found");
+                    container.innerHTML = data.message || "No networks found";
+                    setStatus(data.message || "No networks found");
                     return;
                 }
 
