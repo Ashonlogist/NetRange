@@ -37,6 +37,87 @@ def api_scan():
     })
 
 
+@app.route("/api/scan", methods=["POST"])
+def api_scan_post():
+    data = request.get_json(silent=True) or {}
+    wifi = data.get("wifi") or []
+    cellular = data.get("cellular")
+    loc = data.get("location") or {}
+    lat = loc.get("latitude")
+    lon = loc.get("longitude")
+    if lat is None or lon is None:
+        lat = request.args.get("lat", type=float)
+        lon = request.args.get("lon", type=float)
+    target = (data.get("targetSsid") or "").strip()
+    device_id = data.get("deviceId") or ""
+    timestamp = data.get("timestamp")
+
+    def to_dbm(strength):
+        if not isinstance(strength, (int, float)):
+            return None
+        if strength < 0:
+            return round(strength, 1)
+        if strength <= 1:
+            return round(strength * 50 - 100, 1)
+        return round(strength / 2 - 100, 1)
+
+    records = []
+    seen_bssids = set()
+    for n in wifi:
+        ssid = (n.get("ssid") or "").strip()
+        if target and ssid.lower() != target.lower():
+            continue
+        if not ssid:
+            continue
+        bssid = n.get("bssid", "")
+        if bssid and bssid in seen_bssids:
+            continue
+        seen_bssids.add(bssid)
+        signal_dbm = to_dbm(n.get("strength"))
+        signal_pct = max(0, min(100, round((signal_dbm + 100) * 2))) if signal_dbm is not None else None
+        records.append({
+            "ssid": ssid,
+            "bssid": bssid,
+            "signal_dbm": signal_dbm,
+            "signal_pct": signal_pct,
+            "strength_raw": n.get("strength"),
+            "channel": n.get("channel"),
+            "frequency": n.get("frequency"),
+            "lat": lat,
+            "lon": lon,
+            "accuracy": loc.get("accuracy"),
+            "device_id": device_id,
+            "source": "mobile",
+            "timestamp": timestamp,
+        })
+
+    if cellular and isinstance(cellular, dict):
+        signal_strength = cellular.get("signalStrength")
+        cell_dbm = to_dbm(signal_strength)
+        records.append({
+            "ssid": (cellular.get("carrier") or "Cellular").strip(),
+            "bssid": "",
+            "signal_dbm": cell_dbm,
+            "signal_pct": None,
+            "strength_raw": signal_strength,
+            "channel": None,
+            "frequency": None,
+            "lat": lat,
+            "lon": lon,
+            "accuracy": loc.get("accuracy"),
+            "device_id": device_id,
+            "source": "cellular",
+            "timestamp": timestamp,
+        })
+
+    count = save_scan(records, SCANS_FILE) if records else 0
+    total = len(load_scans(SCANS_FILE))
+    msg = None
+    if count == 0 and target:
+        msg = f"No scan data for SSID '{target}'. Make sure the phone sees that network."
+    return jsonify({"count": count, "totalScans": total, "message": msg})
+
+
 @app.route("/api/scans", methods=["GET"])
 def api_scans():
     scans = load_scans(SCANS_FILE)
