@@ -52,6 +52,18 @@
         .coverage-stat { display: flex; justify-content: space-between; margin: 2px 0; }
         .coverage-stat .label { color: #aaa; }
         .coverage-stat .value { font-weight: bold; }
+
+        @media (max-width: 900px) {
+            body { flex-direction: column; overflow-y: auto; height: 100vh; }
+            #map { height: 50vh; width: 100%; flex: none; order: 1; }
+            #sidebar { width: 100%; max-height: none; border-right: none; border-top: 2px solid #0f3460; padding: 12px; order: 2; }
+            #sidebar h1 { font-size: 1.1em; }
+            .btn { padding: 12px 16px; font-size: 1em; }
+            .form-group input { padding: 10px; font-size: 1em; }
+            #status { font-size: 0.85em; }
+            #scan-results { max-height: 240px; }
+            .scan-entry { font-size: 0.85em; padding: 8px; }
+        }
     </style>
 </head>
 <body>
