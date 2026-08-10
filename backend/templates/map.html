@@ -217,7 +217,7 @@
             setStatus("Getting your location... allow location permission when prompted for best accuracy");
             try {
                 var pos = await new Promise(function(resolve, reject) {
-                    navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 12000, maximumAge: 30000, enableHighAccuracy: true });
+                    navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 20000, maximumAge: 0, enableHighAccuracy: true });
                 });
                 var lat = pos.coords.latitude;
                 var lon = pos.coords.longitude;
@@ -226,7 +226,7 @@
                 document.getElementById("lon").value = lon;
                 placeLocationMarker(lat, lon, acc);
                 var accTxt = acc ? " \u00b1" + Math.round(acc) + "m" : "";
-                setStatus("Location found: " + lat.toFixed(5) + ", " + lon.toFixed(5) + accTxt + (acc > 150 ? " \u2014 rough, move around for a better GPS fix" : ""));
+                setStatus("Location found: " + lat.toFixed(5) + ", " + lon.toFixed(5) + accTxt + (acc > 150 ? " \u2014 network-level only. Turn on GPS and retry." : ""));
             } catch (e) {
                 console.error('geolocation error:', e);
                 var gcode = e && e.code;
@@ -234,6 +234,23 @@
                              gcode === 2 ? "position unavailable (GPS off or indoors)" :
                              gcode === 3 ? "timed out getting GPS" :
                              (e && e.message ? e.message : "unknown error");
+                setStatus("GPS failed (" + greason + ") — retrying once...");
+                try {
+                    var pos2 = await new Promise(function(resolve, reject) {
+                        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 20000, maximumAge: 0, enableHighAccuracy: true });
+                    });
+                    var lat2 = pos2.coords.latitude;
+                    var lon2 = pos2.coords.longitude;
+                    var acc2 = pos2.coords.accuracy || 0;
+                    document.getElementById("lat").value = lat2;
+                    document.getElementById("lon").value = lon2;
+                    placeLocationMarker(lat2, lon2, acc2);
+                    var accTxt2 = acc2 ? " \u00b1" + Math.round(acc2) + "m" : "";
+                    setStatus("Location found: " + lat2.toFixed(5) + ", " + lon2.toFixed(5) + accTxt2 + (acc2 > 150 ? " \u2014 network-level only. Turn on GPS and retry." : ""));
+                    return;
+                } catch (e2) {
+                    console.error('geolocation retry error:', e2);
+                }
                 setStatus("GPS failed (" + greason + ") — trying IP-based location (city-level, not exact)...");
                 try {
                     var resp = await fetch("https://ipwho.is/");
