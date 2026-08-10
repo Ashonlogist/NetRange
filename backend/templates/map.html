@@ -53,6 +53,8 @@
         .coverage-stat .label { color: #aaa; }
         .coverage-stat .value { font-weight: bold; }
         .no-data-banner { margin: 10px 0; padding: 10px; background: #3d2a0a; border: 1px solid #e94560; border-radius: 6px; font-size: 0.75em; line-height: 1.5; color: #ffd9a0; }
+        .btn-download { display: block; text-align: center; background: #1a6b3c; color: white; width: 100%; padding: 12px; font-size: 1em; margin-top: 4px; text-decoration: none; border-radius: 4px; font-weight: bold; }
+        .btn-download:hover { background: #145a2e; }
 
         @media (max-width: 900px) {
             body { flex-direction: column; overflow-y: auto; height: 100vh; }
@@ -72,8 +74,10 @@
         <h1>&#128268; WiFi Coverage <small>Mapper</small></h1>
 
         <div class="no-data-banner" id="noDataBanner">
-            <strong>This website can't scan WiFi</strong> (browsers are blocked from it). To collect data, install the <strong>NetRange app</strong> on your phone via Expo Go — scans sync here automatically. Then pick your network's SSID and tap Generate Coverage Map.
+            <strong>This website can't scan WiFi</strong> (browsers are blocked from it). <a href="https://github.com/Ashonlogist/NetRange/releases/latest/download/netrange.apk" target="_blank" rel="noopener" style="color:#ff8a5c;font-weight:bold;">Download the NetRange app</a> to collect data — scans sync here automatically. Then pick your network's SSID and tap Generate Coverage Map.
         </div>
+
+        <a class="btn btn-download" href="https://github.com/Ashonlogist/NetRange/releases/latest/download/netrange.apk" target="_blank" rel="noopener">&#11015; Download App (Android APK)</a>
 
 <div class="target-info" id="targetInfo">
             <div class="target-ssid" id="targetSsid">Detecting server network...</div>
