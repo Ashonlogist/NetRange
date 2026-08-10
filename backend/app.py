@@ -1,9 +1,11 @@
 import os
 import json
 from flask import Flask, render_template, request, jsonify
+from flask_cors import CORS
 from scanner import scan, save_scan, load_scans, get_current_connection, idw_interpolate
 
 app = Flask(__name__)
+CORS(app)
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 SCANS_FILE = os.path.join(DATA_DIR, "scans.json")
