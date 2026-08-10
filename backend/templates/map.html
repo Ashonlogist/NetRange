@@ -120,6 +120,8 @@
         var coverageLayer;
         var markers = [];
         var targetSsid = null;
+        var locMarker = null;
+        var locCircle = null;
 
         function initMap() {
             console.log('initMap called');
@@ -182,23 +184,52 @@
             }
         }
 
+        function placeLocationMarker(lat, lon, accuracyM) {
+            if (locMarker) map.removeLayer(locMarker);
+            if (locCircle) map.removeLayer(locCircle);
+            var icon = L.divIcon({
+                className: "",
+                html: '<div style="width:18px;height:18px;background:#e94560;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 0 10px rgba(233,69,96,0.8);"></div>',
+                iconSize: [18, 18],
+                iconAnchor: [9, 18],
+                popupAnchor: [0, -18],
+            });
+            locMarker = L.marker([lat, lon], { icon: icon, zIndexOffset: 1000 }).addTo(map);
+            locMarker.bindPopup("<b>Your location</b><br>(" + lat.toFixed(5) + ", " + lon.toFixed(5) + ")" + (accuracyM ? "<br>Accuracy: \u00b1" + Math.round(accuracyM) + " m" : ""));
+            if (accuracyM && accuracyM > 0) {
+                locCircle = L.circle([lat, lon], {
+                    radius: accuracyM, color: '#e94560', weight: 1,
+                    opacity: 0.6, fillColor: '#e94560', fillOpacity: 0.1,
+                }).addTo(map);
+                var latDeg = accuracyM / 111320;
+                var lngDeg = accuracyM / (111320 * Math.cos(lat * Math.PI / 180));
+                map.fitBounds([[lat - latDeg, lon - lngDeg], [lat + latDeg, lon + lngDeg]], { padding: [30, 30] });
+            } else {
+                map.setView([lat, lon], 17);
+            }
+        }
+
         async function autoLocation() {
             if (!navigator.geolocation) {
                 setStatus("Geolocation is not supported by your browser");
                 return;
             }
-            setStatus("Getting your location...");
+            setStatus("Getting your location... allow location permission when prompted for best accuracy");
             try {
                 var pos = await new Promise(function(resolve, reject) {
-                    navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000 });
+                    navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 12000, maximumAge: 30000, enableHighAccuracy: true });
                 });
-                document.getElementById("lat").value = pos.coords.latitude;
-                document.getElementById("lon").value = pos.coords.longitude;
-                map.setView([pos.coords.latitude, pos.coords.longitude], 16);
-                setStatus("Location found: " + pos.coords.latitude.toFixed(4) + ", " + pos.coords.longitude.toFixed(4));
+                var lat = pos.coords.latitude;
+                var lon = pos.coords.longitude;
+                var acc = pos.coords.accuracy || 0;
+                document.getElementById("lat").value = lat;
+                document.getElementById("lon").value = lon;
+                placeLocationMarker(lat, lon, acc);
+                var accTxt = acc ? " \u00b1" + Math.round(acc) + "m" : "";
+                setStatus("Location found: " + lat.toFixed(5) + ", " + lon.toFixed(5) + accTxt + (acc > 150 ? " \u2014 rough, move around for a better GPS fix" : ""));
             } catch (e) {
                 console.error('geolocation error:', e);
-                setStatus("Geolocation denied — trying IP-based location...");
+                setStatus("GPS unavailable \u2014 trying IP-based location (city-level, not exact)...");
                 try {
                     var resp = await fetch("https://ipwho.is/");
                     var ipData = await resp.json();
@@ -207,14 +238,14 @@
                     if (!isNaN(ipLat) && !isNaN(ipLon)) {
                         document.getElementById("lat").value = ipLat;
                         document.getElementById("lon").value = ipLon;
-                        map.setView([ipLat, ipLon], 16);
-                        setStatus("Location from IP: " + ipLat.toFixed(4) + ", " + ipLon.toFixed(4) + " (approximate)");
+                        placeLocationMarker(ipLat, ipLon, 0);
+                        setStatus("Location from IP (city-level, not exact). Allow location permission when prompted for a precise fix.");
                     } else {
-                        setStatus("Could not determine location — enter coordinates manually");
+                        setStatus("Could not determine location \u2014 enter coordinates manually");
                     }
                 } catch (ipErr) {
                     console.error('IP location error:', ipErr);
-                    setStatus("Could not determine location — " + (ipErr && ipErr.message ? ipErr.message : "IP lookup failed") + ". Check internet and retry.");
+                    setStatus("Could not determine location \u2014 " + (ipErr && ipErr.message ? ipErr.message : "IP lookup failed") + ". Check internet and retry.");
                 }
             }
         }
@@ -360,6 +391,8 @@
             heatmap = L.heatLayer([], { radius: 30, blur: 20, maxZoom: 18, max: 1.0 }).addTo(map);
             markers.forEach(function(m) { map.removeLayer(m); });
             markers = [];
+            if (locMarker) { map.removeLayer(locMarker); locMarker = null; }
+            if (locCircle) { map.removeLayer(locCircle); locCircle = null; }
             document.getElementById("scan-results").innerHTML = "";
             document.getElementById("stats").textContent = "";
             document.getElementById("coverage-summary").innerHTML = "";
