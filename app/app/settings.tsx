@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Switch, Platform, Alert } from 'react-native';
 import { Header, Card, Button, Input } from '@/components/UI';
 import { useApp } from '@/components/Providers';
+import { useUpdater } from '@/components/Updater';
 import * as SecureStore from 'expo-secure-store';
 
 export default function SettingsScreen() {
   const { apiUrl, setApiUrl, deviceId, isOnline } = useApp();
+  const updater = useUpdater();
   const [interpolationStep, setInterpolationStep] = useState(0.00005);
   const [interpolationPower, setInterpolationPower] = useState(2);
   const [interpolationRadius, setInterpolationRadius] = useState(0.005);
@@ -106,6 +108,33 @@ export default function SettingsScreen() {
           <Switch value={autoSync} onValueChange={setAutoSync} />
         </View>
         <Text style={styles.helpText}>Automatically send scans to server after each scan.</Text>
+      </Card>
+
+      <Card>
+        <Text style={styles.sectionTitle}>Update</Text>
+        <View style={styles.infoRow}>
+          <Text style={styles.infoLabel}>Installed version</Text>
+          <Text style={styles.infoValue}>v{updater.currentVersion}</Text>
+        </View>
+        {updater.updateInfo && updater.updateInfo.version !== updater.currentVersion && (
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>Latest version</Text>
+            <Text style={[styles.infoValue, { color: '#e94560' }]}>v{updater.updateInfo.version}</Text>
+          </View>
+        )}
+        {updater.state === 'downloading' ? (
+          <Text style={styles.helpText}>Downloading update… {Math.round(updater.progress * 100)}%</Text>
+        ) : updater.state === 'error' ? (
+          <Text style={styles.helpText}>Update error: {updater.error}</Text>
+        ) : null}
+        <Button
+          title={updater.state === 'checking' ? 'Checking…' : 'Check for Updates'}
+          onPress={() => updater.checkForUpdates(false)}
+          disabled={updater.state === 'checking' || updater.state === 'downloading'}
+        />
+        {updater.state === 'available' && (
+          <Button title="Download & Install" onPress={updater.downloadUpdate} />
+        )}
       </Card>
 
       <Card>

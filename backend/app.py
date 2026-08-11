@@ -10,10 +10,26 @@ CORS(app)
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 SCANS_FILE = os.path.join(DATA_DIR, "scans.json")
 
+APP_VERSION = "1.0.2"
+APK_URL = "https://github.com/Ashonlogist/NetRange/releases/latest/download/netrange.apk"
+
 
 @app.route("/")
 def index():
     return render_template("map.html")
+
+
+@app.route("/api/version")
+def api_version():
+    return jsonify({
+        "version": APP_VERSION,
+        "apkUrl": APK_URL,
+        "notes": [
+            "In-app update checker with download progress",
+            "WiFi scan now works (real network scan)",
+            "Coverage map crash fixed (keyless map)",
+        ],
+    })
 
 
 @app.route("/api/scan", methods=["GET"])
