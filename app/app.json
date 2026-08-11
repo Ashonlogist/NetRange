@@ -33,8 +33,10 @@
         "CHANGE_WIFI_STATE",
         "ACCESS_NETWORK_STATE",
         "READ_PHONE_STATE",
+        "NEARBY_WIFI_DEVICES",
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.NEARBY_WIFI_DEVICES"
       ],
       "package": "com.ashonlogist.wifimapper"
     },
@@ -44,7 +46,8 @@
     },
     "plugins": [
       "expo-router",
-      "expo-location"
+      "expo-location",
+      "react-native-wifi-reborn"
     ],
     "scheme": "wifimapper",
     "extra": {

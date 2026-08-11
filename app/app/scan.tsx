@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, Platform, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as Network from 'expo-network';
 import * as Location from 'expo-location';
 import * as Device from 'expo-device';
 import NetInfo from '@react-native-community/netinfo';
+import WifiManager from 'react-native-wifi-reborn';
 import { Header, Card, Button, Input } from '@/components/UI';
 import { useApp } from '@/components/Providers';
 
@@ -21,7 +21,7 @@ interface WifiNetwork {
 
 interface CellularInfo {
   carrier: string;
-  signalStrength: number; // 0-4 or dBm
+  signalStrength?: number; // not exposed by React Native on Android
   networkType: string;
   isConnected: boolean;
 }
@@ -80,19 +80,26 @@ export default function ScanScreen() {
       let wifi: WifiNetwork[] = [];
       if (Platform.OS === 'android') {
         try {
-          const networks = await Network.getNetworkListAsync();
+          const networks = await WifiManager.loadWifiList();
           wifi = networks
-            .filter(n => n.type === Network.NetworkType.WIFI)
             .map(n => ({
-              ssid: n.ssid || 'hidden',
-              bssid: n.bssid || '',
-              strength: n.strength || 0,
+              ssid: n.SSID || 'hidden',
+              bssid: n.BSSID || '',
+              strength: n.level || 0,
               frequency: n.frequency,
               channel: n.frequency ? Math.round((n.frequency - 2407) / 5) : undefined,
-              isConnected: n.isConnected || false,
+              isConnected: false,
             }))
             .sort((a, b) => b.strength - a.strength);
-        } catch (e) {
+        } catch (e: any) {
+          const msg = e?.message || 'WiFi scan failed';
+          if (msg === 'locationServicesOff') {
+            setError('WiFi scanning needs Location Services ON. Enable location in your phone settings and rescan.');
+          } else if (msg === 'locationPermissionMissing') {
+            setError('Location permission is required for WiFi scanning.');
+          } else {
+            setError(msg);
+          }
           console.warn('WiFi scan failed:', e);
         }
       }
@@ -104,7 +111,7 @@ export default function ScanScreen() {
         if (netInfo.type === 'cellular' && netInfo.details) {
           cellular = {
             carrier: netInfo.details.carrier || 'Unknown',
-            signalStrength: netInfo.details.signalStrength || 0,
+            signalStrength: undefined,
             networkType: netInfo.details.cellularGeneration || 'Unknown',
             isConnected: netInfo.isConnected || false,
           };
@@ -235,7 +242,7 @@ export default function ScanScreen() {
               <View>
                 <Text style={styles.networkSsid}>{cellularInfo.carrier}</Text>
                 <Text style={styles.networkMeta}>
-                  {cellularInfo.networkType} • Signal: {cellularInfo.signalStrength}
+                  {cellularInfo.networkType} • Signal: {cellularInfo.signalStrength ?? 'n/a'}
                 </Text>
               </View>
             </View>
