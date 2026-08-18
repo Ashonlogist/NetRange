@@ -847,6 +847,7 @@
         var locMarker = null;
         var locCircle = null;
         var baseLayers = {};
+        var labelsLayer = null;
         var currentLayer = 'streets';
         var tilePane;
 
@@ -885,6 +886,13 @@
                 });
                 baseLayers.streets.addTo(map);
 
+                // Labels overlay for satellite/terrain
+                labelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
+                    attribution: '&copy; CartoDB',
+                    maxZoom: 19,
+                    pane: 'overlayPane',
+                });
+
                 if (typeof L.heatLayer === 'undefined') {
                     throw new Error('L.heatLayer not found - leaflet.heat plugin not loaded');
                 }
@@ -904,6 +912,12 @@
             // Add new
             baseLayers[key].addTo(map);
             currentLayer = key;
+            // Show labels on satellite and terrain (they don't have built-in labels)
+            if (key === 'satellite' || key === 'terrain') {
+                if (!map.hasLayer(labelsLayer)) labelsLayer.addTo(map);
+            } else {
+                if (map.hasLayer(labelsLayer)) map.removeLayer(labelsLayer);
+            }
             // Apply tile filter
             if (tilePane) {
                 tilePane.style.filter = LAYERS[key].filter || 'none';
