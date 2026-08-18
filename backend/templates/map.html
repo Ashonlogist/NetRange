@@ -646,6 +646,54 @@
 
         /* Custom Leaflet tile filter for dark mode */
         .leaflet-tile-pane { filter: brightness(0.7) contrast(1.1) saturate(0.8); }
+        .leaflet-tile-pane.tile-normal { filter: none; }
+
+        /* ===== LAYER SWITCHER ===== */
+        .layer-switcher {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            z-index: 500;
+            display: flex;
+            gap: 4px;
+            padding: 5px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(var(--glass-blur));
+            -webkit-backdrop-filter: blur(var(--glass-blur));
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+        }
+        .layer-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 3px;
+            padding: 8px 12px;
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.65em;
+            font-weight: 500;
+            color: var(--text-muted);
+            background: transparent;
+            transition: all 0.2s;
+        }
+        .layer-btn:hover { color: var(--text-secondary); background: var(--surface); }
+        .layer-btn.active {
+            color: var(--text-primary);
+            background: var(--surface-hover);
+            border: 1px solid var(--glass-border);
+        }
+        .layer-btn .layer-icon { font-size: 1.6em; }
+        @media (max-width: 900px) {
+            .layer-switcher {
+                top: 12px;
+                right: 12px;
+            }
+            .layer-btn { padding: 6px 8px; font-size: 0.6em; }
+        }
     </style>
 </head>
 <body>
@@ -769,6 +817,25 @@
     <div id="map"></div>
     <button id="menuBtn" onclick="toggleSidebar()" aria-label="Open menu">&#9776;</button>
 
+    <div class="layer-switcher">
+        <button class="layer-btn active" data-layer="streets" onclick="switchLayer('streets')">
+            <span class="layer-icon">&#128739;</span>
+            Streets
+        </button>
+        <button class="layer-btn" data-layer="satellite" onclick="switchLayer('satellite')">
+            <span class="layer-icon">&#128752;</span>
+            Satellite
+        </button>
+        <button class="layer-btn" data-layer="terrain" onclick="switchLayer('terrain')">
+            <span class="layer-icon">&#9968;</span>
+            Terrain
+        </button>
+        <button class="layer-btn" data-layer="dark" onclick="switchLayer('dark')">
+            <span class="layer-icon">&#127769;</span>
+            Dark
+        </button>
+    </div>
+
     <div class="toast" id="toast"></div>
 
     <script>
@@ -779,14 +846,44 @@
         var targetSsid = null;
         var locMarker = null;
         var locCircle = null;
+        var baseLayers = {};
+        var currentLayer = 'streets';
+        var tilePane;
+
+        var LAYERS = {
+            streets: {
+                url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                opts: { attribution: '&copy; OpenStreetMap', maxZoom: 19 },
+                filter: 'none',
+            },
+            satellite: {
+                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                opts: { attribution: '&copy; Esri', maxZoom: 18 },
+                filter: 'none',
+            },
+            terrain: {
+                url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+                opts: { attribution: '&copy; OpenTopoMap', maxZoom: 17 },
+                filter: 'none',
+            },
+            dark: {
+                url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                opts: { attribution: '&copy; CartoDB', maxZoom: 19 },
+                filter: 'brightness(0.7) contrast(1.1) saturate(0.8)',
+            },
+        };
 
         function initMap() {
             try {
                 map = L.map("map").setView([0, 0], 2);
-                L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-                    attribution: '&copy; OpenStreetMap',
-                    maxZoom: 19,
-                }).addTo(map);
+                tilePane = document.querySelector('.leaflet-tile-pane');
+
+                // Create all base layers, add streets by default
+                Object.keys(LAYERS).forEach(function(key) {
+                    var cfg = LAYERS[key];
+                    baseLayers[key] = L.tileLayer(cfg.url, cfg.opts);
+                });
+                baseLayers.streets.addTo(map);
 
                 if (typeof L.heatLayer === 'undefined') {
                     throw new Error('L.heatLayer not found - leaflet.heat plugin not loaded');
@@ -798,6 +895,24 @@
                 console.error('initMap error:', e);
                 setStatus('Map init failed: ' + e.message);
             }
+        }
+
+        function switchLayer(key) {
+            if (!baseLayers[key]) return;
+            // Remove current
+            baseLayers[currentLayer].removeFrom(map);
+            // Add new
+            baseLayers[key].addTo(map);
+            currentLayer = key;
+            // Apply tile filter
+            if (tilePane) {
+                tilePane.style.filter = LAYERS[key].filter || 'none';
+            }
+            // Update button states
+            document.querySelectorAll('.layer-btn').forEach(function(btn) {
+                btn.classList.toggle('active', btn.dataset.layer === key);
+            });
+            showToast('Map: ' + key.charAt(0).toUpperCase() + key.slice(1));
         }
 
         function setStatus(msg) {
