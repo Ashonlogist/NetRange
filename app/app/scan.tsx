@@ -1,19 +1,24 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Platform, Alert } from 'react-native';
+import React, { useEffect, useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  Platform,
+  Alert,
+  ActivityIndicator,
+} from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import * as Device from 'expo-device';
 import NetInfo from '@react-native-community/netinfo';
-import WifiManager from 'react-native-wifi-reborn';
-import { Header, Card, Button, Input } from '@/components/UI';
+import { Header, Card, Button, Input, Badge, T } from '@/components/UI';
 import { useApp } from '@/components/Providers';
-
-type NetworkType = 'wifi' | 'cellular';
 
 interface WifiNetwork {
   ssid: string;
   bssid: string;
-  strength: number; // 0-1 or dBm
+  strength: number;
   frequency?: number;
   channel?: number;
   isConnected: boolean;
@@ -21,7 +26,7 @@ interface WifiNetwork {
 
 interface CellularInfo {
   carrier: string;
-  signalStrength?: number; // not exposed by React Native on Android
+  signalStrength?: number;
   networkType: string;
   isConnected: boolean;
 }
@@ -33,6 +38,14 @@ interface ScanResult {
   timestamp: string;
 }
 
+function signalColor(dbm: number) {
+  return dbm > -50 ? T.green : dbm > -60 ? T.yellow : dbm > -70 ? T.orange : T.red;
+}
+
+function signalLabel(dbm: number) {
+  return dbm > -50 ? 'Excellent' : dbm > -60 ? 'Good' : dbm > -70 ? 'Fair' : 'Weak';
+}
+
 export default function ScanScreen() {
   const router = useRouter();
   const { apiUrl, currentLocation, setCurrentLocation, deviceId } = useApp();
@@ -42,26 +55,17 @@ export default function ScanScreen() {
   const [lastScan, setLastScan] = useState<ScanResult | null>(null);
   const [targetSsid, setTargetSsid] = useState('');
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (Platform.OS !== 'web') {
-      requestPermissions();
       loadNetworks();
     }
   }, []);
 
-  const requestPermissions = async () => {
-    if (Platform.OS !== 'web') {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setError('Location permission denied — cannot tag scans with GPS');
-      }
-    }
-  };
-
   const loadNetworks = async () => {
     if (Platform.OS === 'web') {
-      setError('Web mode: scanning not available. Run on device for full features.');
+      setError('Web mode: scanning not available. Use the Android app.');
       return;
     }
 
@@ -69,38 +73,55 @@ export default function ScanScreen() {
     setError('');
 
     try {
-      // Get location
-      const loc = await Location.getCurrentPositionAsync({ 
-        accuracy: Location.Accuracy.High,
-        timeout: 10000 
-      });
+      // Ensure permission first
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setError('Location permission denied. Enable it in settings.');
+        setScanning(false);
+        return;
+      }
+
+      // Get location with fallback
+      let loc: Location.LocationObject;
+      try {
+        loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
+      } catch {
+        // High accuracy failed, try balanced
+        loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+      }
       setCurrentLocation(loc.coords);
 
-      // Get WiFi networks (Android only, limited on iOS)
+      // Scan WiFi (Android only)
       let wifi: WifiNetwork[] = [];
       if (Platform.OS === 'android') {
         try {
+          const WifiManager = require('react-native-wifi-reborn').default;
           const networks = await WifiManager.loadWifiList();
           wifi = networks
-            .map(n => ({
+            .map((n: any) => ({
               ssid: n.SSID || 'hidden',
               bssid: n.BSSID || '',
               strength: n.level || 0,
               frequency: n.frequency,
-              channel: n.frequency ? Math.round((n.frequency - 2407) / 5) : undefined,
+              channel: n.frequency
+                ? Math.round((n.frequency - 2407) / 5)
+                : undefined,
               isConnected: false,
             }))
-            .sort((a, b) => b.strength - a.strength);
+            .sort((a: WifiNetwork, b: WifiNetwork) => b.strength - a.strength);
         } catch (e: any) {
           const msg = e?.message || 'WiFi scan failed';
           if (msg === 'locationServicesOff') {
-            setError('WiFi scanning needs Location Services ON. Enable location in your phone settings and rescan.');
+            setError('WiFi scanning needs Location Services ON. Enable in phone settings.');
           } else if (msg === 'locationPermissionMissing') {
             setError('Location permission is required for WiFi scanning.');
           } else {
-            setError(msg);
+            setError(`WiFi scan: ${msg}`);
           }
-          console.warn('WiFi scan failed:', e);
         }
       }
 
@@ -110,19 +131,19 @@ export default function ScanScreen() {
         const netInfo = await NetInfo.fetch();
         if (netInfo.type === 'cellular' && netInfo.details) {
           cellular = {
-            carrier: netInfo.details.carrier || 'Unknown',
+            carrier: (netInfo.details as any).carrier || 'Unknown',
             signalStrength: undefined,
-            networkType: netInfo.details.cellularGeneration || 'Unknown',
+            networkType: (netInfo.details as any).cellularGeneration || 'Unknown',
             isConnected: netInfo.isConnected || false,
           };
         }
-      } catch (e) {
-        console.warn('Cellular info failed:', e);
+      } catch {
+        // Cellular info is optional
       }
 
       setWifiNetworks(wifi);
       setCellularInfo(cellular);
-      
+
       const result: ScanResult = {
         wifi,
         cellular,
@@ -130,7 +151,6 @@ export default function ScanScreen() {
         timestamp: new Date().toISOString(),
       };
       setLastScan(result);
-
     } catch (e: any) {
       setError(e.message || 'Scan failed');
     } finally {
@@ -138,17 +158,16 @@ export default function ScanScreen() {
     }
   };
 
-  const handleScanPress = () => loadNetworks();
-
   const handleSelectNetwork = (ssid: string) => {
     setTargetSsid(ssid);
-    Alert.alert('Target Set', `Now mapping: ${ssid}`, [{ text: 'OK' }]);
+    Alert.alert('Target Set', `Now mapping: ${ssid}`);
   };
 
   const handleSaveScan = async () => {
     if (!lastScan) return Alert.alert('No Data', 'Scan first');
     if (!targetSsid) return Alert.alert('No Target', 'Select a network SSID first');
 
+    setSaving(true);
     try {
       const response = await fetch(`${apiUrl}/api/scan`, {
         method: 'POST',
@@ -159,10 +178,19 @@ export default function ScanScreen() {
           deviceId,
         }),
       });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        Alert.alert('Save Failed', `Server error (${response.status}): ${errText}`);
+        return;
+      }
+
       const data = await response.json();
       Alert.alert('Saved', `Scan saved to server (${data.count} points)`);
     } catch (e) {
-      Alert.alert('Save Failed', e instanceof Error ? e.message : 'Unknown error');
+      Alert.alert('Save Failed', e instanceof Error ? e.message : 'Network error');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -171,62 +199,77 @@ export default function ScanScreen() {
     router.push(`/map?ssid=${encodeURIComponent(targetSsid)}`);
   };
 
+  // ── Web mode ───────────────────────────────────────────
   if (Platform.OS === 'web') {
     return (
-      <View style={styles.container}>
-        <Header title="Scan Networks" subtitle="Web mode — scanning unavailable" />
-        <Card style={styles.infoCard}>
-          <Text style={styles.infoText}>
-            📱 Scanning requires native mobile app (iOS/Android).
-            <Text style={{marginTop: 8}}>Run on device:</Text>
-            <Text>• npx expo start</Text>
-            <Text>• Scan QR with Expo Go</Text>
-            <Text>• Or build: npx expo run:android / run:ios</Text>
+      <ScrollView style={s.container} contentContainerStyle={s.content}>
+        <Header title="Scan Networks" subtitle="Web mode unavailable" />
+        <Card style={s.infoCard}>
+          <Ionicons name="phone-portrait-outline" size={40} color={T.textMuted} />
+          <Text style={s.infoTitle}>Scanning requires the Android app</Text>
+          <Text style={s.infoDesc}>
+            Browsers cannot access WiFi hardware. Download the NetRange app to scan networks and sync data to the server.
           </Text>
         </Card>
-        <Button title="Go to Map" onPress={() => router.push('/map')} variant="secondary" />
-      </View>
+        <Button
+          title="Open Coverage Map"
+          onPress={() => router.push('/map')}
+          variant="secondary"
+        />
+      </ScrollView>
     );
   }
 
+  // ── Native mode ────────────────────────────────────────
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Header title="Scan Networks" subtitle={scanning ? 'Scanning...' : 'Tap to scan'} />
-      
-      {error && <Card style={styles.errorCard}><Text style={styles.errorText}>{error}</Text></Card>}
-
-      <Button 
-        title={scanning ? 'Scanning...' : '📡 Scan Now'} 
-        onPress={handleScanPress} 
-        disabled={scanning}
-        loading={scanning}
-        style={styles.scanButton}
+    <ScrollView style={s.container} contentContainerStyle={s.content}>
+      <Header
+        title="Scan Networks"
+        subtitle={scanning ? 'Scanning...' : 'Tap to scan at current location'}
       />
 
+      {error ? (
+        <Card style={s.errorCard}>
+          <Ionicons name="alert-circle" size={18} color={T.red} />
+          <Text style={s.errorText}>{error}</Text>
+        </Card>
+      ) : null}
+
+      <Button
+        title={scanning ? 'Scanning...' : 'Scan Now'}
+        onPress={loadNetworks}
+        disabled={scanning}
+        loading={scanning}
+        icon={scanning ? undefined : '📡'}
+      />
+
+      {/* WiFi Networks */}
       {wifiNetworks.length > 0 && (
         <>
-          <Text style={styles.sectionTitle}>WiFi Networks ({wifiNetworks.length})</Text>
+          <Text style={s.sectionTitle}>WiFi Networks ({wifiNetworks.length})</Text>
           {wifiNetworks.map((net, i) => (
-            <Card 
+            <Card
               key={`${net.bssid}-${i}`}
               onPress={() => handleSelectNetwork(net.ssid)}
-              style={styles.networkCard}
+              style={s.networkCard}
             >
-              <View style={styles.networkRow}>
-                <View style={styles.networkMain}>
-                  <Text style={[styles.networkSsid, net.isConnected && styles.connected]}>{net.ssid}</Text>
-                  <Text style={styles.networkMeta}>
-                    {net.bssid} • Ch {net.channel || '?'} • {net.frequency} MHz
+              <View style={s.networkRow}>
+                <View style={s.networkInfo}>
+                  <View style={s.networkNameRow}>
+                    <Text style={s.networkSsid} numberOfLines={1}>
+                      {net.ssid}
+                    </Text>
+                    {net.isConnected && <Badge label="Connected" variant="success" />}
+                  </View>
+                  <Text style={s.networkMeta}>
+                    {net.bssid} · Ch {net.channel || '?'} · {net.frequency} MHz
                   </Text>
                 </View>
-                <View style={styles.networkStrength}>
-                  <Text style={[
-                    styles.strengthText,
-                    net.strength > -50 ? styles.excellent : net.strength > -60 ? styles.good : net.strength > -70 ? styles.fair : styles.weak
-                  ]}>
-                    {net.strength} dBm
+                <View style={s.signalCol}>
+                  <Text style={[s.signalDbm, { color: signalColor(net.strength) }]}>
+                    {net.strength}
                   </Text>
-                  {net.isConnected && <Text style={styles.connectedBadge}>CONNECTED</Text>}
+                  <Badge label={signalLabel(net.strength)} variant={net.strength > -50 ? 'success' : net.strength > -60 ? 'warning' : 'danger'} />
                 </View>
               </View>
             </Card>
@@ -234,69 +277,106 @@ export default function ScanScreen() {
         </>
       )}
 
+      {/* Cellular */}
       {cellularInfo && (
         <>
-          <Text style={styles.sectionTitle}>Cellular</Text>
+          <Text style={s.sectionTitle}>Cellular</Text>
           <Card>
-            <View style={styles.networkRow}>
-              <View>
-                <Text style={styles.networkSsid}>{cellularInfo.carrier}</Text>
-                <Text style={styles.networkMeta}>
-                  {cellularInfo.networkType} • Signal: {cellularInfo.signalStrength ?? 'n/a'}
+            <View style={s.networkRow}>
+              <View style={s.networkInfo}>
+                <Text style={s.networkSsid}>{cellularInfo.carrier}</Text>
+                <Text style={s.networkMeta}>
+                  {cellularInfo.networkType} · Signal: {cellularInfo.signalStrength ?? 'n/a'}
                 </Text>
               </View>
+              <Badge label={cellularInfo.isConnected ? 'Online' : 'Offline'} variant={cellularInfo.isConnected ? 'success' : 'danger'} />
             </View>
           </Card>
         </>
       )}
 
-      {lastScan && (
+      {/* Location */}
+      {lastScan?.location && (
         <>
-          <Text style={styles.sectionTitle}>Location</Text>
+          <Text style={s.sectionTitle}>Location</Text>
           <Card>
-            <Text style={styles.locationText}>
-              Lat: {lastScan.location?.latitude.toFixed(6)} 
-              Lon: {lastScan.location?.longitude.toFixed(6)}
-              <Text style={{display: 'block', marginTop: 4}}>
-                Time: {new Date(lastScan.timestamp).toLocaleTimeString()}
-              </Text>
+            <Text style={s.locationText}>
+              {lastScan.location.latitude.toFixed(6)}, {lastScan.location.longitude.toFixed(6)}
+            </Text>
+            <Text style={s.locationTime}>
+              {new Date(lastScan.timestamp).toLocaleTimeString()}
             </Text>
           </Card>
         </>
       )}
 
+      {/* Target + Actions */}
+      <Text style={s.sectionTitle}>Target Network</Text>
+      <Input
+        label=""
+        value={targetSsid}
+        onChangeText={setTargetSsid}
+        placeholder="Enter SSID (e.g. STUDENT)"
+      />
+
       {targetSsid && lastScan && (
-        <View style={styles.actions}>
-          <Button title="💾 Save Scan to Server" onPress={handleSaveScan} variant="secondary" />
-          <Button title="🗺️ Generate Coverage Map" onPress={handleGenerateCoverage} />
+        <View style={s.actions}>
+          <Button
+            title={saving ? 'Saving...' : 'Save to Server'}
+            onPress={handleSaveScan}
+            disabled={saving}
+            loading={saving}
+            variant="secondary"
+            style={{ flex: 1 }}
+          />
+          <Button
+            title="View Coverage"
+            onPress={handleGenerateCoverage}
+            icon="🗺️"
+            style={{ flex: 1 }}
+          />
         </View>
       )}
     </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e' },
-  content: { padding: 20, paddingBottom: 40, gap: 16 },
-  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#e94560', marginTop: 8, marginBottom: 8 },
-  networkCard: { padding: 12 },
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: T.bg },
+  content: { padding: 20, paddingTop: 60, paddingBottom: 40, gap: 12 },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: T.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  networkCard: { padding: 14 },
   networkRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  networkMain: { flex: 1 },
-  networkSsid: { fontSize: 16, fontWeight: '600', color: '#eee' },
-  connected: { color: '#0f0' },
-  networkMeta: { fontSize: 12, color: '#888', marginTop: 2 },
-  networkStrength: { alignItems: 'flex-end', gap: 4 },
-  strengthText: { fontSize: 18, fontWeight: '700' },
-  excellent: { color: '#0f0' },
-  good: { color: '#ff0' },
-  fair: { color: '#fa0' },
-  weak: { color: '#f44' },
-  connectedBadge: { fontSize: 10, color: '#0f0', backgroundColor: '#0f03', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  locationText: { fontSize: 14, color: '#ccc', fontFamily: 'monospace' },
-  actions: { flexDirection: 'row', gap: 12, marginTop: 8 },
-  errorCard: { backgroundColor: '#3d0a0a', borderColor: '#f44' },
-  errorText: { color: '#f88' },
-  infoCard: { backgroundColor: '#0f3460', borderColor: '#1a4a8a' },
-  infoText: { color: '#aaa', fontSize: 14, lineHeight: 22 },
-  scanButton: { marginTop: 8 },
+  networkInfo: { flex: 1, marginRight: 12 },
+  networkNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+  networkSsid: { fontSize: 15, fontWeight: '600', color: T.text, flexShrink: 1 },
+  networkMeta: { fontSize: 11, color: T.textMuted, fontFamily: 'monospace' },
+  signalCol: { alignItems: 'flex-end', gap: 4 },
+  signalDbm: { fontSize: 16, fontWeight: '700', fontFamily: 'monospace' },
+  locationText: { fontSize: 14, color: T.text, fontFamily: 'monospace' },
+  locationTime: { fontSize: 12, color: T.textMuted, marginTop: 4 },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  errorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    borderColor: 'rgba(239,68,68,0.2)',
+  },
+  errorText: { color: '#fca5a5', fontSize: 13, flex: 1 },
+  infoCard: {
+    alignItems: 'center',
+    paddingVertical: 32,
+    gap: 12,
+  },
+  infoTitle: { fontSize: 16, fontWeight: '600', color: T.text },
+  infoDesc: { fontSize: 13, color: T.textMuted, textAlign: 'center', lineHeight: 20 },
 });

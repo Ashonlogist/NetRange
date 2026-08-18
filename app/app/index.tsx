@@ -1,53 +1,143 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Card, Button, Header } from '@/components/UI';
+import { Card, Header, T } from '@/components/UI';
+
+const CARDS = [
+  {
+    icon: 'wifi' as const,
+    iconColor: T.accent,
+    title: 'Scan Networks',
+    desc: 'WiFi + cellular signal strength',
+    route: '/scan' as const,
+    iconBg: 'rgba(124,58,237,0.15)',
+  },
+  {
+    icon: 'map' as const,
+    iconColor: T.accent2,
+    title: 'Coverage Map',
+    desc: 'View interpolated heatmap',
+    route: '/map' as const,
+    iconBg: 'rgba(6,182,212,0.15)',
+  },
+  {
+    icon: 'settings-outline' as const,
+    iconColor: T.green,
+    title: 'Settings',
+    desc: 'API, interpolation, sync',
+    route: '/settings' as const,
+    iconBg: 'rgba(34,197,94,0.15)',
+  },
+];
 
 export default function IndexScreen() {
   const router = useRouter();
 
   return (
-    <View style={styles.container}>
-      <Header title="WiFi Mapper" subtitle="Map WiFi & Cellular coverage" />
-      
-      <View style={styles.grid}>
-        <Card onPress={() => router.push('/scan')} style={styles.card}>
-          <Ionicons name="wifi" size={48} color="#e94560" />
-          <Text style={styles.cardTitle}>Scan Networks</Text>
-          <Text style={styles.cardDesc}>WiFi + Cellular signal strength</Text>
-        </Card>
+    <View style={s.container}>
+      <Header
+        title="NetRange"
+        subtitle="Campus WiFi coverage mapping"
+        right={
+          <View style={s.badge}>
+            <Text style={s.badgeText}>
+              {Platform.OS === 'web' ? 'Web' : Platform.OS === 'android' ? 'Android' : 'iOS'}
+            </Text>
+          </View>
+        }
+      />
 
-        <Card onPress={() => router.push('/map')} style={styles.card}>
-          <Ionicons name="map-outline" size={48} color="#0f3460" />
-          <Text style={styles.cardTitle}>Coverage Map</Text>
-          <Text style={styles.cardDesc}>View interpolated signal heatmap</Text>
-        </Card>
-
-        <Card onPress={() => router.push('/settings')} style={styles.card}>
-          <Ionicons name="settings-outline" size={48} color="#1a4a8a" />
-          <Text style={styles.cardTitle}>Settings</Text>
-          <Text style={styles.cardDesc}>API, interpolation, sync</Text>
-        </Card>
+      <View style={s.grid}>
+        {CARDS.map((c) => (
+          <Card
+            key={c.route}
+            onPress={() => router.push(c.route)}
+            style={s.card}
+            glow
+          >
+            <View style={[s.iconWrap, { backgroundColor: c.iconBg }]}>
+              <Ionicons name={c.icon} size={28} color={c.iconColor} />
+            </View>
+            <View style={s.cardBody}>
+              <Text style={s.cardTitle}>{c.title}</Text>
+              <Text style={s.cardDesc}>{c.desc}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={T.textMuted} />
+          </Card>
+        ))}
       </View>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>
-          {Platform.OS === 'web' 
-            ? 'Web mode: View maps only (no scanning)' 
-            : 'Native: Full WiFi + Cellular scanning'}
+      <View style={s.footer}>
+        <Text style={s.footerText}>
+          {Platform.OS === 'web'
+            ? 'Web mode: view maps only (no scanning)'
+            : 'Native: full WiFi + cellular scanning'}
         </Text>
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e', padding: 20 },
-  grid: { flex: 1, gap: 16 },
-  card: { padding: 24, alignItems: 'center', gap: 12 },
-  cardTitle: { fontSize: 18, fontWeight: '600', color: '#eee' },
-  cardDesc: { fontSize: 14, color: '#888', textAlign: 'center' },
-  footer: { paddingTop: 20, borderTopWidth: 1, borderTopColor: '#0f3460' },
-  footerText: { fontSize: 12, color: '#666', textAlign: 'center' },
+const s = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: T.bg,
+    padding: 20,
+    paddingTop: 60,
+  },
+  grid: {
+    flex: 1,
+    gap: 12,
+  },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 18,
+    gap: 14,
+  },
+  iconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardBody: {
+    flex: 1,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: T.text,
+    marginBottom: 2,
+  },
+  cardDesc: {
+    fontSize: 13,
+    color: T.textMuted,
+  },
+  footer: {
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: T.border,
+  },
+  footerText: {
+    fontSize: 12,
+    color: T.textMuted,
+    textAlign: 'center',
+  },
+  badge: {
+    backgroundColor: T.surface,
+    borderWidth: 1,
+    borderColor: T.border,
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  badgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: T.textSec,
+    textTransform: 'uppercase',
+  },
 });

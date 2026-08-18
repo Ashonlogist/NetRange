@@ -8,7 +8,6 @@ import {
   View,
 } from 'react-native';
 import * as Application from 'expo-application';
-import RnBlobUtil from 'react-native-blob-util';
 import { useApp } from '@/components/Providers';
 
 export type UpdateState = 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'error';
@@ -41,8 +40,6 @@ function compareVersions(a: string, b: string): number {
   }
   return 0;
 }
-
-const APK_PATH = `${RnBlobUtil.fs.dirs.DownloadDir}/netrange.apk`;
 
 export function UpdaterProvider({ children }: { children: React.ReactNode }) {
   const { apiUrl } = useApp();
@@ -101,6 +98,16 @@ export function UpdaterProvider({ children }: { children: React.ReactNode }) {
 
   const downloadUpdate = async () => {
     if (!updateInfo) return;
+
+    // Native-only: react-native-blob-util
+    if (Platform.OS === 'web') {
+      Alert.alert('Not supported', 'Download updates from the GitHub releases page.');
+      return;
+    }
+
+    const RnBlobUtil = require('react-native-blob-util').default;
+    const APK_PATH = `${RnBlobUtil.fs.dirs.DownloadDir}/netrange.apk`;
+
     setState('downloading');
     setProgress(0);
     setError('');
@@ -147,7 +154,7 @@ export function UpdaterProvider({ children }: { children: React.ReactNode }) {
         <Modal transparent visible onRequestClose={() => {}}>
           <View style={styles.backdrop}>
             <View style={styles.card}>
-              <Text style={styles.title}>Downloading update…</Text>
+              <Text style={styles.title}>Downloading update...</Text>
               <View style={styles.barTrack}>
                 <View style={[styles.barFill, { width: `${Math.round(progress * 100)}%` }]} />
               </View>
@@ -170,7 +177,7 @@ export function useUpdater(): UpdaterContextValue {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(0,0,0,0.7)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
@@ -178,20 +185,22 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 360,
-    backgroundColor: '#16213e',
-    borderRadius: 12,
-    padding: 24,
+    backgroundColor: 'rgba(15,20,40,0.9)',
+    borderRadius: 16,
+    padding: 28,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
-  title: { color: '#eee', fontSize: 17, fontWeight: '600', marginBottom: 16 },
+  title: { color: 'rgba(255,255,255,0.95)', fontSize: 17, fontWeight: '600', marginBottom: 16 },
   barTrack: {
     width: '100%',
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#0f3460',
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     overflow: 'hidden',
   },
-  barFill: { height: '100%', backgroundColor: '#e94560', borderRadius: 7 },
-  percent: { color: '#e94560', fontSize: 20, fontWeight: '700', marginTop: 12 },
-  hint: { color: '#888', fontSize: 12, marginTop: 8 },
+  barFill: { height: '100%', backgroundColor: '#7c3aed', borderRadius: 4 },
+  percent: { color: '#7c3aed', fontSize: 22, fontWeight: '700', marginTop: 14 },
+  hint: { color: 'rgba(255,255,255,0.35)', fontSize: 12, marginTop: 8 },
 });

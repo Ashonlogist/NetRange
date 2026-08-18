@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Switch, Platform, Alert } from 'react-native';
-import { Header, Card, Button, Input } from '@/components/UI';
+import { View, Text, StyleSheet, Switch, Platform, Alert, ScrollView } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Header, Card, Button, Input, StatRow, T } from '@/components/UI';
 import { useApp } from '@/components/Providers';
 import { useUpdater } from '@/components/Updater';
 import * as SecureStore from 'expo-secure-store';
@@ -8,9 +9,9 @@ import * as SecureStore from 'expo-secure-store';
 export default function SettingsScreen() {
   const { apiUrl, setApiUrl, deviceId, isOnline } = useApp();
   const updater = useUpdater();
-  const [interpolationStep, setInterpolationStep] = useState(0.00005);
-  const [interpolationPower, setInterpolationPower] = useState(2);
-  const [interpolationRadius, setInterpolationRadius] = useState(0.005);
+  const [interpolationStep, setInterpolationStep] = useState('0.00005');
+  const [interpolationPower, setInterpolationPower] = useState('2');
+  const [interpolationRadius, setInterpolationRadius] = useState('0.005');
   const [autoSync, setAutoSync] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -26,9 +27,9 @@ export default function SettingsScreen() {
         SecureStore.getItemAsync('interpolationRadius'),
         SecureStore.getItemAsync('autoSync'),
       ]);
-      if (step) setInterpolationStep(parseFloat(step));
-      if (power) setInterpolationPower(parseInt(power));
-      if (radius) setInterpolationRadius(parseFloat(radius));
+      if (step) setInterpolationStep(step);
+      if (power) setInterpolationPower(power);
+      if (radius) setInterpolationRadius(radius);
       if (sync) setAutoSync(sync === 'true');
     } catch (e) {
       console.warn('Settings load failed:', e);
@@ -40,9 +41,9 @@ export default function SettingsScreen() {
     try {
       await Promise.all([
         SecureStore.setItemAsync('apiUrl', apiUrl),
-        SecureStore.setItemAsync('interpolationStep', interpolationStep.toString()),
-        SecureStore.setItemAsync('interpolationPower', interpolationPower.toString()),
-        SecureStore.setItemAsync('interpolationRadius', interpolationRadius.toString()),
+        SecureStore.setItemAsync('interpolationStep', interpolationStep),
+        SecureStore.setItemAsync('interpolationPower', interpolationPower),
+        SecureStore.setItemAsync('interpolationRadius', interpolationRadius),
         SecureStore.setItemAsync('autoSync', autoSync.toString()),
       ]);
       Alert.alert('Saved', 'Settings saved successfully');
@@ -54,118 +55,176 @@ export default function SettingsScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Header title="Settings" subtitle="Configure API & interpolation" />
-      
-      <Card>
-        <Text style={styles.sectionTitle}>Server</Text>
+    <ScrollView style={s.container} contentContainerStyle={s.content}>
+      <Header title="Settings" subtitle="Configure API and interpolation" />
+
+      {/* Server */}
+      <Card glow>
+        <View style={s.cardHeader}>
+          <View style={[s.iconWrap, { backgroundColor: 'rgba(124,58,237,0.15)' }]}>
+            <Ionicons name="server-outline" size={18} color={T.accent} />
+          </View>
+          <Text style={s.cardTitle}>Server</Text>
+        </View>
         <Input
           label="API Base URL"
           value={apiUrl}
           onChangeText={setApiUrl}
           placeholder="https://netrange-backend.onrender.com"
-          keyboardType="default"
         />
-        <Text style={styles.helpText}>
-          Your backend URL. The default is the hosted Render backend; use a LAN IP (e.g., 192.168.x.x:5000) only if running locally.
+        <Text style={s.helpText}>
+          Default is the hosted Render backend. Use a LAN IP for local dev.
         </Text>
       </Card>
 
+      {/* Interpolation */}
       <Card>
-        <Text style={styles.sectionTitle}>Interpolation (IDW)</Text>
+        <View style={s.cardHeader}>
+          <View style={[s.iconWrap, { backgroundColor: 'rgba(6,182,212,0.15)' }]}>
+            <Ionicons name="options-outline" size={18} color={T.accent2} />
+          </View>
+          <Text style={s.cardTitle}>Interpolation (IDW)</Text>
+        </View>
         <Input
           label="Grid Step (degrees)"
-          value={interpolationStep.toString()}
-          onChangeText={t => setInterpolationStep(parseFloat(t) || 0.00005)}
+          value={interpolationStep}
+          onChangeText={setInterpolationStep}
           keyboardType="decimal-pad"
           placeholder="0.00005"
         />
-        <Text style={styles.helpText}>Smaller = higher resolution, slower. ~5-10m per step.</Text>
-
+        <Text style={s.helpText}>Smaller = higher resolution. ~5-10m per step.</Text>
         <Input
           label="Power Parameter"
-          value={interpolationPower.toString()}
-          onChangeText={t => setInterpolationPower(parseInt(t) || 2)}
+          value={interpolationPower}
+          onChangeText={setInterpolationPower}
           keyboardType="numeric"
           placeholder="2"
         />
-        <Text style={styles.helpText}>Higher = closer points dominate more. 2 is standard.</Text>
-
+        <Text style={s.helpText}>Higher = closer points dominate more. 2 is standard.</Text>
         <Input
           label="Max Radius (degrees)"
-          value={interpolationRadius.toString()}
-          onChangeText={t => setInterpolationRadius(parseFloat(t) || 0.005)}
+          value={interpolationRadius}
+          onChangeText={setInterpolationRadius}
           keyboardType="decimal-pad"
           placeholder="0.005"
         />
-        <Text style={styles.helpText}>Max distance to consider points. ~500m at equator.</Text>
+        <Text style={s.helpText}>Max distance to consider. ~500m at equator.</Text>
       </Card>
 
+      {/* Sync */}
       <Card>
-        <Text style={styles.sectionTitle}>Sync</Text>
-        <View style={styles.toggleRow}>
-          <Text>Auto-sync scans to server</Text>
-          <Switch value={autoSync} onValueChange={setAutoSync} />
-        </View>
-        <Text style={styles.helpText}>Automatically send scans to server after each scan.</Text>
-      </Card>
-
-      <Card>
-        <Text style={styles.sectionTitle}>Update</Text>
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Installed version</Text>
-          <Text style={styles.infoValue}>v{updater.currentVersion}</Text>
-        </View>
-        {updater.updateInfo && updater.updateInfo.version !== updater.currentVersion && (
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Latest version</Text>
-            <Text style={[styles.infoValue, { color: '#e94560' }]}>v{updater.updateInfo.version}</Text>
+        <View style={s.cardHeader}>
+          <View style={[s.iconWrap, { backgroundColor: 'rgba(34,197,94,0.15)' }]}>
+            <Ionicons name="sync-outline" size={18} color={T.green} />
           </View>
-        )}
-        {updater.state === 'downloading' ? (
-          <Text style={styles.helpText}>Downloading update… {Math.round(updater.progress * 100)}%</Text>
-        ) : updater.state === 'error' ? (
-          <Text style={styles.helpText}>Update error: {updater.error}</Text>
-        ) : null}
-        <Button
-          title={updater.state === 'checking' ? 'Checking…' : 'Check for Updates'}
-          onPress={() => updater.checkForUpdates(false)}
-          disabled={updater.state === 'checking' || updater.state === 'downloading'}
-        />
-        {updater.state === 'available' && (
-          <Button title="Download & Install" onPress={updater.downloadUpdate} />
-        )}
+          <Text style={s.cardTitle}>Sync</Text>
+        </View>
+        <View style={s.toggleRow}>
+          <Text style={s.toggleLabel}>Auto-sync scans</Text>
+          <Switch
+            value={autoSync}
+            onValueChange={setAutoSync}
+            trackColor={{ false: 'rgba(255,255,255,0.1)', true: 'rgba(124,58,237,0.4)' }}
+            thumbColor={autoSync ? T.accent : 'rgba(255,255,255,0.3)'}
+          />
+        </View>
+        <Text style={s.helpText}>Automatically send scans after each scan.</Text>
       </Card>
 
+      {/* Update */}
       <Card>
-        <Text style={styles.sectionTitle}>Device Info</Text>
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Device ID</Text>
-          <Text style={styles.infoValue}>{deviceId}</Text>
+        <View style={s.cardHeader}>
+          <View style={[s.iconWrap, { backgroundColor: 'rgba(249,115,22,0.15)' }]}>
+            <Ionicons name="arrow-up-circle-outline" size={18} color={T.orange} />
+          </View>
+          <Text style={s.cardTitle}>Update</Text>
         </View>
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Online</Text>
-          <Text style={[styles.infoValue, { color: isOnline ? '#0f0' : '#f44' }]}>
-            {isOnline ? 'Connected' : 'Offline'}
-          </Text>
-        </View>
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>Platform</Text>
-          <Text style={styles.infoValue}>{Platform.OS}</Text>
+        <StatRow label="Installed" value={`v${updater.currentVersion}`} />
+        {updater.updateInfo && updater.updateInfo.version !== updater.currentVersion && (
+          <StatRow label="Latest" value={`v${updater.updateInfo.version}`} valueColor={T.accent} />
+        )}
+        {updater.state === 'downloading' && (
+          <Text style={s.helpText}>Downloading... {Math.round(updater.progress * 100)}%</Text>
+        )}
+        {updater.state === 'error' && (
+          <Text style={[s.helpText, { color: T.red }]}>Error: {updater.error}</Text>
+        )}
+        <View style={{ gap: 8, marginTop: 12 }}>
+          <Button
+            title={updater.state === 'checking' ? 'Checking...' : 'Check for Updates'}
+            onPress={() => updater.checkForUpdates(false)}
+            disabled={updater.state === 'checking' || updater.state === 'downloading'}
+            variant="secondary"
+          />
+          {updater.state === 'available' && (
+            <Button title="Download & Install" onPress={updater.downloadUpdate} />
+          )}
         </View>
       </Card>
 
-      <Button title={saving ? 'Saving...' : '💾 Save Settings'} onPress={saveSettings} disabled={saving} />
-    </View>
+      {/* Device Info */}
+      <Card>
+        <View style={s.cardHeader}>
+          <View style={[s.iconWrap, { backgroundColor: 'rgba(239,68,68,0.15)' }]}>
+            <Ionicons name="phone-portrait-outline" size={18} color={T.red} />
+          </View>
+          <Text style={s.cardTitle}>Device Info</Text>
+        </View>
+        <StatRow label="Device ID" value={deviceId || 'unknown'} />
+        <StatRow
+          label="Status"
+          value={isOnline ? 'Online' : 'Offline'}
+          valueColor={isOnline ? T.green : T.red}
+        />
+        <StatRow label="Platform" value={Platform.OS} />
+      </Card>
+
+      <Button
+        title={saving ? 'Saving...' : 'Save Settings'}
+        onPress={saveSettings}
+        disabled={saving}
+        loading={saving}
+      />
+    </ScrollView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e', padding: 20 },
-  sectionTitle: { fontSize: 16, fontWeight: '600', color: '#e94560', marginBottom: 12 },
-  helpText: { fontSize: 12, color: '#666', marginTop: 4, marginBottom: 12, lineHeight: 18 },
-  toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
-  infoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#0f3460' },
-  infoLabel: { color: '#888', fontSize: 14 },
-  infoValue: { color: '#eee', fontSize: 14, fontWeight: '500', fontFamily: 'monospace' },
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: T.bg },
+  content: { padding: 20, paddingTop: 60, paddingBottom: 40, gap: 12 },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 14,
+  },
+  iconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: T.text,
+  },
+  helpText: {
+    fontSize: 12,
+    color: T.textMuted,
+    marginTop: -6,
+    marginBottom: 10,
+    lineHeight: 18,
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  toggleLabel: {
+    color: T.text,
+    fontSize: 14,
+  },
 });

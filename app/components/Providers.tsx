@@ -1,7 +1,6 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import * as Location from 'expo-location';
-import * as Device from 'expo-device';
 import NetInfo from '@react-native-community/netinfo';
 import { Platform } from 'react-native';
 
@@ -24,8 +23,11 @@ export function Providers({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     loadSettings();
-    setupNetworkListener();
-    requestPermissions();
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsOnline(state.isConnected ?? false);
+    });
+    requestInitialLocation();
+    return () => unsubscribe();
   }, []);
 
   const loadSettings = async () => {
@@ -35,8 +37,9 @@ export function Providers({ children }: { children: ReactNode }) {
         SecureStore.getItemAsync('deviceId'),
       ]);
       if (url) setApiUrl(url);
-      if (id) setDeviceId(id);
-      else {
+      if (id) {
+        setDeviceId(id);
+      } else {
         const newId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         await SecureStore.setItemAsync('deviceId', newId);
         setDeviceId(newId);
@@ -46,20 +49,18 @@ export function Providers({ children }: { children: ReactNode }) {
     }
   };
 
-  const setupNetworkListener = () => {
-    const unsubscribe = NetInfo.addEventListener(state => {
-      setIsOnline(state.isConnected ?? false);
-    });
-    return unsubscribe;
-  };
-
-  const requestPermissions = async () => {
-    if (Platform.OS !== 'web') {
+  const requestInitialLocation = async () => {
+    if (Platform.OS === 'web') return;
+    try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        const loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
         setCurrentLocation(loc.coords);
       }
+    } catch (e) {
+      console.warn('Initial location failed:', e);
     }
   };
 
