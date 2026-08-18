@@ -7,8 +7,18 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "ios": {
+        "simulator": false
+      },
+      "env": {
+        "NODE_VERSION": "18"
       }
     },
-    "production": {}
+    "production": {
+      "env": {
+        "NODE_VERSION": "18"
+      }
+    }
   }
 }
