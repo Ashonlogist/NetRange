@@ -886,7 +886,7 @@
                 });
                 baseLayers.streets.addTo(map);
 
-                // Labels overlay for satellite/terrain
+                // Labels overlay for satellite/terrain (they lack built-in labels)
                 labelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
                     attribution: '&copy; CartoDB',
                     maxZoom: 19,
