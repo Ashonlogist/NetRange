@@ -42,5 +42,8 @@
     "eslint-config-expo": "~7.1.2",
     "typescript": "~5.3.0"
   },
-  "private": true
+  "private": true,
+  "resolutions": {
+    "react-native": "0.74.5"
+  }
 }
