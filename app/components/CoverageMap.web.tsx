@@ -12,7 +12,7 @@ export default function CoverageMap() {
   useEffect(() => {
     if (!frameHost.current) return;
     const iframe = document.createElement('iframe');
-    iframe.src = `${apiUrl}/`;
+    iframe.src = `${apiUrl}/map`;
     iframe.style.width = '100%';
     iframe.style.height = '100%';
     iframe.style.border = '0';

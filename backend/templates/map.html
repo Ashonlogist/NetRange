@@ -3,158 +3,775 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WiFi Coverage Map</title>
+    <title>NetRange — Coverage Map</title>
     <link rel="stylesheet" href="/static/vendor/leaflet.css" />
     <script src="/static/vendor/leaflet.js"></script>
     <script src="/static/vendor/leaflet-heat.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #1a1a2e; color: #eee; display: flex; height: 100vh; overflow: hidden; }
-        #sidebar { width: 340px; background: #16213e; padding: 16px; overflow-y: auto; flex-shrink: 0; border-right: 1px solid #0f3460; }
-        #sidebar h1 { font-size: 1.3em; color: #e94560; margin-bottom: 4px; }
-        #sidebar h1 small { font-size: 0.6em; color: #888; font-weight: normal; }
-        #sidebar h2 { font-size: 0.95em; color: #e94560; margin: 14px 0 6px; border-bottom: 1px solid #0f3460; padding-bottom: 4px; }
-        .form-group { margin-bottom: 8px; }
-        .form-group label { display: block; font-size: 0.75em; color: #aaa; margin-bottom: 2px; }
-        .form-group input, .form-group select { width: 100%; padding: 6px 8px; border: 1px solid #0f3460; border-radius: 4px; background: #1a1a2e; color: #eee; font-size: 0.9em; }
-        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.85em; font-weight: bold; margin: 3px 2px; }
-        .btn-scan { background: #e94560; color: white; width: 100%; padding: 10px; font-size: 1em; margin-top: 8px; }
-        .btn-scan:hover { background: #c73652; }
-        .btn-clear { background: #0f3460; color: #eee; width: 100%; margin-top: 4px; }
-        .btn-clear:hover { background: #1a4a8a; }
-        .btn-auto { background: #0f3460; color: #eee; width: 100%; margin-top: 4px; border: 1px solid #e94560; }
-        .btn-auto:hover { background: #1a4a8a; }
-        .btn-coverage { background: #1a6b3c; color: white; width: 100%; padding: 10px; font-size: 1em; margin-top: 8px; }
-        .btn-coverage:hover { background: #145a2e; }
-        #map { flex: 1; }
-        #scan-results { margin-top: 10px; max-height: 200px; overflow-y: auto; }
-        .scan-entry { padding: 5px 8px; margin-bottom: 3px; background: #0f3460; border-radius: 4px; font-size: 0.78em; display: flex; justify-content: space-between; align-items: center; }
-        .scan-entry .ssid { font-weight: bold; color: #e94560; }
-        .scan-entry .rssi { font-weight: bold; }
-        .scan-entry .rssi.weak { color: #f44; }
-        .scan-entry .rssi.fair { color: #fa0; }
-        .scan-entry .rssi.good { color: #ff0; }
-        .scan-entry .rssi.excellent { color: #0f0; }
-        .stats { font-size: 0.78em; color: #aaa; margin-top: 6px; }
-        .legend { margin-top: 10px; padding: 8px; background: #0f3460; border-radius: 4px; font-size: 0.72em; }
-        .legend-bar { height: 12px; border-radius: 3px; margin: 4px 0; }
-        #status { font-size: 0.78em; color: #aaa; margin-top: 8px; padding: 6px; background: #0f3460; border-radius: 4px; min-height: 1.5em; }
-        .target-info { background: #0f3460; padding: 8px; border-radius: 4px; margin-bottom: 8px; font-size: 0.8em; }
-        .target-info .target-ssid { color: #e94560; font-weight: bold; font-size: 1.1em; }
-        .target-info .target-detail { color: #aaa; font-size: 0.85em; margin-top: 2px; }
-        .coverage-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.75em; font-weight: bold; }
-        .coverage-badge.excellent { background: #0a3d0a; color: #0f0; }
-        .coverage-badge.good { background: #3d3d0a; color: #ff0; }
-        .coverage-badge.fair { background: #3d1a0a; color: #fa0; }
-        .coverage-badge.weak { background: #3d0a0a; color: #f44; }
-        #coverage-summary { margin-top: 8px; padding: 8px; background: #0f3460; border-radius: 4px; font-size: 0.78em; }
-        #coverage-stats { margin-top: 6px; padding: 8px; background: #0f3460; border-radius: 4px; font-size: 0.78em; }
-        .coverage-stat { display: flex; justify-content: space-between; margin: 2px 0; }
-        .coverage-stat .label { color: #aaa; }
-        .coverage-stat .value { font-weight: bold; }
-        .no-data-banner { margin: 10px 0; padding: 10px; background: #3d2a0a; border: 1px solid #e94560; border-radius: 6px; font-size: 0.75em; line-height: 1.5; color: #ffd9a0; }
-        .btn-download { display: block; text-align: center; background: #1a6b3c; color: white; width: 100%; padding: 12px; font-size: 1em; margin-top: 4px; text-decoration: none; border-radius: 4px; font-weight: bold; }
-        .btn-download:hover { background: #145a2e; }
+        :root {
+            --glass-bg: rgba(12, 15, 30, 0.65);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --glass-highlight: rgba(255, 255, 255, 0.04);
+            --glass-blur: 24px;
+            --accent: #7c3aed;
+            --accent-glow: rgba(124, 58, 237, 0.4);
+            --accent-2: #06b6d4;
+            --accent-2-glow: rgba(6, 182, 212, 0.3);
+            --gradient: linear-gradient(135deg, #7c3aed, #06b6d4);
+            --gradient-warm: linear-gradient(135deg, #f43f5e, #f59e0b);
+            --text-primary: rgba(255, 255, 255, 0.95);
+            --text-secondary: rgba(255, 255, 255, 0.6);
+            --text-muted: rgba(255, 255, 255, 0.35);
+            --surface: rgba(255, 255, 255, 0.05);
+            --surface-hover: rgba(255, 255, 255, 0.08);
+            --border-subtle: rgba(255, 255, 255, 0.06);
+            --green: #22c55e;
+            --yellow: #eab308;
+            --orange: #f97316;
+            --red: #ef4444;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-xl: 20px;
+        }
 
-        #menuBtn, #closeBtn { display: none; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #070a14;
+            color: var(--text-primary);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ===== SIDEBAR ===== */
+        #sidebar {
+            width: 380px;
+            height: 100vh;
+            background: var(--glass-bg);
+            backdrop-filter: blur(var(--glass-blur));
+            -webkit-backdrop-filter: blur(var(--glass-blur));
+            border-right: 1px solid var(--glass-border);
+            overflow-y: auto;
+            overflow-x: hidden;
+            flex-shrink: 0;
+            padding: 0;
+            z-index: 100;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255,255,255,0.1) transparent;
+        }
+        #sidebar::-webkit-scrollbar { width: 5px; }
+        #sidebar::-webkit-scrollbar-track { background: transparent; }
+        #sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+
+        /* Header */
+        .sidebar-header {
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            padding: 20px 24px 16px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(var(--glass-blur));
+            -webkit-backdrop-filter: blur(var(--glass-blur));
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .brand-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--gradient);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2em;
+            box-shadow: 0 4px 16px var(--accent-glow);
+        }
+        .brand-text h1 {
+            font-size: 1.15em;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .brand-text span {
+            font-size: 0.72em;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+        #closeBtn { display: none; }
+
+        /* Sidebar content */
+        .sidebar-body {
+            padding: 16px 20px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* ===== GLASS CARD ===== */
+        .glass-card {
+            background: var(--surface);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .glass-card:hover {
+            background: var(--surface-hover);
+            border-color: rgba(255,255,255,0.1);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .card-header-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.85em;
+            flex-shrink: 0;
+        }
+        .card-header-icon.purple { background: rgba(124,58,237,0.15); }
+        .card-header-icon.cyan { background: rgba(6,182,212,0.15); }
+        .card-header-icon.green { background: rgba(34,197,94,0.15); }
+        .card-header-icon.orange { background: rgba(249,115,22,0.15); }
+        .card-header-icon.red { background: rgba(239,68,68,0.15); }
+
+        .card-title {
+            font-size: 0.8em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-secondary);
+        }
+
+        /* ===== NO DATA BANNER ===== */
+        .banner {
+            background: linear-gradient(135deg, rgba(249,115,22,0.12), rgba(239,68,68,0.08));
+            border: 1px solid rgba(249,115,22,0.2);
+            border-radius: var(--radius-md);
+            padding: 14px;
+            font-size: 0.8em;
+            line-height: 1.6;
+            color: rgba(253, 186, 116, 0.9);
+        }
+        .banner a {
+            color: var(--accent-2);
+            font-weight: 600;
+            text-decoration: none;
+            border-bottom: 1px solid rgba(6,182,212,0.3);
+            transition: border-color 0.2s;
+        }
+        .banner a:hover { border-color: var(--accent-2); }
+
+        /* ===== FORM ELEMENTS ===== */
+        .form-group {
+            margin-bottom: 10px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 0.72em;
+            font-weight: 500;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            background: rgba(0,0,0,0.3);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.88em;
+            font-weight: 400;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            outline: none;
+        }
+        .form-group input::placeholder { color: var(--text-muted); }
+        .form-group input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        /* ===== BUTTONS ===== */
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            width: 100%;
+            padding: 11px 16px;
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.85em;
+            font-weight: 600;
+            transition: all 0.2s;
+            outline: none;
+            position: relative;
+            overflow: hidden;
+        }
+        .btn::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.1), transparent);
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .btn:hover::after { opacity: 1; }
+
+        .btn-primary {
+            background: var(--gradient);
+            color: white;
+            box-shadow: 0 4px 20px var(--accent-glow);
+        }
+        .btn-primary:hover {
+            box-shadow: 0 6px 28px var(--accent-glow);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: var(--surface);
+            color: var(--text-primary);
+            border: 1px solid var(--glass-border);
+        }
+        .btn-secondary:hover {
+            background: var(--surface-hover);
+            border-color: rgba(255,255,255,0.12);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: white;
+            box-shadow: 0 4px 20px rgba(16,185,129,0.3);
+        }
+        .btn-success:hover {
+            box-shadow: 0 6px 28px rgba(16,185,129,0.4);
+            transform: translateY(-1px);
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px dashed var(--border-subtle);
+        }
+        .btn-ghost:hover {
+            color: var(--text-primary);
+            border-color: rgba(255,255,255,0.15);
+            background: var(--surface);
+        }
+
+        .btn-download {
+            background: var(--surface);
+            color: var(--text-primary);
+            border: 1px solid var(--glass-border);
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .btn-download:hover {
+            background: var(--surface-hover);
+            border-color: var(--accent);
+            box-shadow: 0 4px 20px var(--accent-glow);
+        }
+
+        .btn-sm { padding: 8px 12px; font-size: 0.78em; }
+        .btn-group { display: flex; gap: 8px; }
+        .btn-group .btn { flex: 1; }
+
+        /* ===== TARGET INFO ===== */
+        .target-card {
+            background: linear-gradient(135deg, rgba(124,58,237,0.08), rgba(6,182,212,0.05));
+            border: 1px solid rgba(124,58,237,0.15);
+        }
+        .target-ssid {
+            font-size: 1.1em;
+            font-weight: 700;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 2px;
+        }
+        .target-detail {
+            font-size: 0.78em;
+            color: var(--text-muted);
+        }
+
+        /* ===== NETWORK LIST ===== */
+        .network-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            margin-bottom: 4px;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .network-item:hover {
+            background: var(--surface-hover);
+            border-color: var(--accent);
+        }
+        .network-item .ssid {
+            font-weight: 600;
+            font-size: 0.85em;
+            color: var(--text-primary);
+        }
+        .network-item .signal {
+            font-size: 0.75em;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 20px;
+        }
+        .signal.excellent { background: rgba(34,197,94,0.15); color: var(--green); }
+        .signal.good { background: rgba(234,179,8,0.15); color: var(--yellow); }
+        .signal.fair { background: rgba(249,115,22,0.15); color: var(--orange); }
+        .signal.weak { background: rgba(239,68,68,0.15); color: var(--red); }
+
+        /* ===== SCAN RESULTS ===== */
+        #scan-results {
+            max-height: 220px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255,255,255,0.1) transparent;
+        }
+        .scan-entry {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 10px;
+            margin-bottom: 3px;
+            background: rgba(0,0,0,0.2);
+            border-radius: var(--radius-sm);
+            font-size: 0.8em;
+            border: 1px solid var(--border-subtle);
+        }
+
+        /* ===== STATUS BAR ===== */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            font-size: 0.78em;
+            color: var(--text-secondary);
+            min-height: 40px;
+        }
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent);
+            flex-shrink: 0;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        /* ===== COVERAGE STATS ===== */
+        .coverage-badges {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .coverage-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.72em;
+            font-weight: 600;
+        }
+        .coverage-badge.excellent { background: rgba(34,197,94,0.15); color: var(--green); }
+        .coverage-badge.good { background: rgba(234,179,8,0.15); color: var(--yellow); }
+        .coverage-badge.fair { background: rgba(249,115,22,0.15); color: var(--orange); }
+        .coverage-badge.weak { background: rgba(239,68,68,0.15); color: var(--red); }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--border-subtle);
+            font-size: 0.8em;
+        }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: var(--text-muted); }
+        .stat-value { font-weight: 600; }
+
+        /* ===== LEGEND ===== */
+        .legend-bar {
+            height: 8px;
+            border-radius: 4px;
+            margin: 8px 0;
+            background: linear-gradient(to right, var(--red), var(--orange), var(--yellow), var(--green));
+        }
+        .legend-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.7em;
+            color: var(--text-muted);
+        }
+
+        /* ===== MAP ===== */
+        #map {
+            flex: 1;
+            background: #070a14;
+        }
+        .leaflet-control-attribution {
+            background: var(--glass-bg) !important;
+            backdrop-filter: blur(12px) !important;
+            -webkit-backdrop-filter: blur(12px) !important;
+            border: 1px solid var(--glass-border) !important;
+            border-radius: var(--radius-sm) !important;
+            padding: 4px 8px !important;
+            font-size: 10px !important;
+            color: var(--text-muted) !important;
+        }
+        .leaflet-control-attribution a {
+            color: var(--text-secondary) !important;
+        }
+
+        /* ===== MOBILE MENU BUTTON ===== */
+        #menuBtn {
+            display: none;
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 500;
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            border: none;
+            background: var(--gradient);
+            color: white;
+            font-size: 1.3em;
+            cursor: pointer;
+            box-shadow: 0 8px 32px var(--accent-glow);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        #menuBtn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 12px 40px var(--accent-glow);
+        }
+
+        /* ===== OVERLAY ===== */
+        .sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            backdrop-filter: blur(4px);
+            z-index: 99;
+        }
+
+        /* ===== MOBILE ===== */
         @media (max-width: 900px) {
-            body { display: block; height: 100vh; overflow: hidden; }
+            body { display: block; }
             #map { height: 100vh; width: 100%; }
             #sidebar {
-                position: fixed; top: 0; right: -100%; width: 100%; height: 100%;
-                z-index: 1000; transition: right 0.3s ease; padding: 16px;
-                border-right: none; box-shadow: -4px 0 20px rgba(0,0,0,0.5);
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 85%;
+                max-width: 380px;
+                height: 100%;
+                transform: translateX(-100%);
+                transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+                z-index: 200;
+                border-right: 1px solid var(--glass-border);
+                box-shadow: 20px 0 60px rgba(0,0,0,0.5);
             }
-            #sidebar.open { right: 0; }
+            #sidebar.open {
+                transform: translateX(0);
+            }
             #menuBtn {
-                display: block; position: absolute; top: 12px; right: 12px; z-index: 500;
-                background: #16213e; color: #eee; border: 1px solid #0f3460; border-radius: 8px;
-                font-size: 1.4em; width: 44px; height: 44px; cursor: pointer;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+                display: flex;
+                align-items: center;
+                justify-content: center;
             }
             #closeBtn {
-                display: block; position: absolute; top: 10px; right: 12px; z-index: 1001;
-                background: #e94560; color: white; border: none; border-radius: 8px;
-                font-size: 1.1em; width: 40px; height: 40px; cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                position: absolute;
+                top: 16px;
+                right: 16px;
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                border: 1px solid var(--glass-border);
+                background: var(--surface);
+                color: var(--text-secondary);
+                font-size: 1em;
+                cursor: pointer;
+                z-index: 10;
+                transition: all 0.2s;
             }
-            #sidebar h1 { font-size: 1.1em; padding-right: 44px; }
-            .btn { padding: 12px 16px; font-size: 1em; }
-            .form-group input { padding: 10px; font-size: 1em; }
-            #status { font-size: 0.85em; }
-            #scan-results { max-height: 240px; }
-            .scan-entry { font-size: 0.85em; padding: 8px; }
+            #closeBtn:hover {
+                background: var(--surface-hover);
+                color: var(--text-primary);
+            }
+            .sidebar-overlay.active { display: block; }
+            .sidebar-header { padding-right: 56px; }
         }
+
+        /* ===== LOADING SPINNER ===== */
+        .spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ===== FAB (floating action buttons on map) ===== */
+        .map-fabs {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 400;
+            display: flex;
+            gap: 8px;
+            padding: 8px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(var(--glass-blur));
+            -webkit-backdrop-filter: blur(var(--glass-blur));
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-xl);
+            box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+        }
+        .map-fab {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 16px;
+            border: none;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.82em;
+            font-weight: 600;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .map-fab.primary {
+            background: var(--gradient);
+            color: white;
+            box-shadow: 0 4px 16px var(--accent-glow);
+        }
+        .map-fab.primary:hover {
+            box-shadow: 0 6px 24px var(--accent-glow);
+            transform: translateY(-1px);
+        }
+        .map-fab.success {
+            background: linear-gradient(135deg, #059669, #10b981);
+            color: white;
+        }
+        .map-fab.ghost {
+            background: var(--surface);
+            color: var(--text-secondary);
+            border: 1px solid var(--glass-border);
+        }
+        .map-fab.ghost:hover {
+            color: var(--text-primary);
+            background: var(--surface-hover);
+        }
+        @media (max-width: 900px) {
+            .map-fabs {
+                left: 16px;
+                right: 80px;
+                transform: none;
+                bottom: 24px;
+                overflow-x: auto;
+            }
+            .map-fab { padding: 8px 12px; font-size: 0.78em; }
+        }
+
+        /* ===== TOAST NOTIFICATION ===== */
+        .toast {
+            position: fixed;
+            top: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-100px);
+            z-index: 1000;
+            padding: 12px 20px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(var(--glass-blur));
+            -webkit-backdrop-filter: blur(var(--glass-blur));
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius-md);
+            font-size: 0.85em;
+            color: var(--text-primary);
+            box-shadow: 0 8px 40px rgba(0,0,0,0.4);
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            pointer-events: none;
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); }
+
+        /* Custom Leaflet tile filter for dark mode */
+        .leaflet-tile-pane { filter: brightness(0.7) contrast(1.1) saturate(0.8); }
     </style>
 </head>
 <body>
+    <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+
     <div id="sidebar">
-        <button id="closeBtn" onclick="toggleSidebar()" aria-label="Close">&#10005;</button>
-        <h1>&#128268; WiFi Coverage <small>Mapper</small></h1>
-
-        <div class="no-data-banner" id="noDataBanner">
-            <strong>This website can't scan WiFi</strong> (browsers are blocked from it). <a href="https://github.com/Ashonlogist/NetRange/releases/latest/download/netrange.apk" target="_blank" rel="noopener" style="color:#ff8a5c;font-weight:bold;">Download the NetRange app</a> to collect data — scans sync here automatically. Then pick your network's SSID and tap Generate Coverage Map.
+        <div class="sidebar-header">
+            <button id="closeBtn" onclick="toggleSidebar()" aria-label="Close">&#10005;</button>
+            <div class="brand">
+                <div class="brand-icon">&#128225;</div>
+                <div class="brand-text">
+                    <h1>NetRange</h1>
+                    <span>Coverage Mapper</span>
+                </div>
+            </div>
         </div>
 
-        <a class="btn btn-download" href="https://github.com/Ashonlogist/NetRange/releases/latest/download/netrange.apk" target="_blank" rel="noopener">&#11015; Download App (Android APK)</a>
+        <div class="sidebar-body">
+            <!-- Banner -->
+            <div class="banner" id="noDataBanner">
+                <strong>Browsers can't scan WiFi.</strong>
+                <a href="https://github.com/Ashonlogist/NetRange/releases/latest/download/netrange.apk" target="_blank" rel="noopener">Download the Android app</a> to collect scans — they sync here automatically. Then pick your SSID and generate the coverage map.
+            </div>
 
-<div class="target-info" id="targetInfo">
-            <div class="target-ssid" id="targetSsid">Detecting server network...</div>
-            <div class="target-detail" id="targetDetail">⚠️ This shows the <strong>server's</strong> WiFi. If accessing remotely, enter your network SSID manually below.</div>
-        </div>
+            <!-- Download -->
+            <a class="btn btn-download" href="https://github.com/Ashonlogist/NetRange/releases/latest/download/netrange.apk" target="_blank" rel="noopener">
+                &#11015; Get the Android App
+            </a>
 
-        <h2>Location</h2>
-        <div class="form-group">
-            <label>Latitude</label>
-            <input type="number" id="lat" step="any" placeholder="e.g. 6.5244">
-        </div>
-        <div class="form-group">
-            <label>Longitude</label>
-            <input type="number" id="lon" step="any" placeholder="e.g. 3.3792">
-        </div>
-        <button class="btn btn-auto" onclick="autoLocation()">&#128205; Auto-detect Location</button>
+            <!-- Target Network -->
+            <div class="glass-card target-card" id="targetInfo">
+                <div class="target-ssid" id="targetSsid">Detecting server network...</div>
+                <div class="target-detail" id="targetDetail">This shows the server's WiFi. If accessing remotely, enter your SSID below.</div>
+            </div>
 
-        <h2>Target Network</h2>
-        <div class="form-group">
-            <label>SSID (type or pick from scan)</label>
-            <input type="text" id="targetSsidFilter" placeholder="e.g. STUDENT">
-        </div>
-        <button class="btn btn-auto" onclick="scanNetworks()">📡 Scan Available Networks</button>
-        <div id="networkList" style="display:none; margin-top:8px;"></div>
+            <!-- Location Card -->
+            <div class="glass-card">
+                <div class="card-header">
+                    <div class="card-header-icon cyan">&#128205;</div>
+                    <span class="card-title">Location</span>
+                </div>
+                <div class="form-group">
+                    <label>Latitude</label>
+                    <input type="number" id="lat" step="any" placeholder="6.5244">
+                </div>
+                <div class="form-group">
+                    <label>Longitude</label>
+                    <input type="number" id="lon" step="any" placeholder="3.3792">
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="autoLocation()">Auto-detect Location</button>
+            </div>
 
-        <button class="btn btn-scan" onclick="doScan()">Scan WiFi at This Location</button>
+            <!-- Network Card -->
+            <div class="glass-card">
+                <div class="card-header">
+                    <div class="card-header-icon purple">&#128225;</div>
+                    <span class="card-title">Target Network</span>
+                </div>
+                <div class="form-group">
+                    <label>SSID</label>
+                    <input type="text" id="targetSsidFilter" placeholder="e.g. STUDENT">
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-secondary btn-sm" onclick="scanNetworks()">Scan Networks</button>
+                    <button class="btn btn-primary btn-sm" onclick="doScan()">Scan Here</button>
+                </div>
+                <div id="networkList" style="display:none; margin-top:10px;"></div>
+            </div>
 
-        <h2>Coverage Map</h2>
-        <button class="btn btn-coverage" onclick="generateCoverage()">Generate Coverage Map</button>
-        <button class="btn btn-clear" onclick="clearCoverage()">Clear Coverage</button>
+            <!-- Coverage Card -->
+            <div class="glass-card">
+                <div class="card-header">
+                    <div class="card-header-icon green">&#127758;</div>
+                    <span class="card-title">Coverage Map</span>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-success btn-sm" onclick="generateCoverage()">Generate Map</button>
+                    <button class="btn btn-ghost btn-sm" onclick="clearCoverage()">Clear</button>
+                </div>
+                <div id="status" class="status-bar" style="margin-top:12px">
+                    <span class="status-dot"></span>
+                    <span id="statusText">Ready</span>
+                </div>
+            </div>
 
-        <div id="status">Ready</div>
-        <div class="stats" id="stats"></div>
-        <div id="coverage-summary"></div>
-        <div id="coverage-stats"></div>
+            <!-- Coverage Stats -->
+            <div id="coverage-stats-card" style="display:none" class="glass-card">
+                <div class="card-header">
+                    <div class="card-header-icon orange">&#128202;</div>
+                    <span class="card-title">Coverage Statistics</span>
+                </div>
+                <div id="coverage-summary" class="coverage-badges"></div>
+                <div id="coverage-stats"></div>
+            </div>
 
-        <h2>Scan Log</h2>
-        <div id="scan-results"></div>
+            <!-- Scan Log -->
+            <div class="glass-card">
+                <div class="card-header">
+                    <div class="card-header-icon red">&#128196;</div>
+                    <span class="card-title">Scan Log</span>
+                </div>
+                <div id="scan-results"></div>
+                <div class="stats" id="stats" style="font-size:0.75em;color:var(--text-muted);margin-top:6px"></div>
+            </div>
 
-        <div class="legend">
-            <strong>Signal Strength</strong>
-            <div class="legend-bar" style="background: linear-gradient(to right, #f44, #fa0, #ff0, #0f0);"></div>
-            <span>Weak (-80)</span> &rarr; <span>Excellent (-30)</span> dBm
+            <!-- Legend -->
+            <div class="glass-card">
+                <div class="card-header">
+                    <div class="card-header-icon cyan">&#127912;</div>
+                    <span class="card-title">Signal Legend</span>
+                </div>
+                <div class="legend-bar"></div>
+                <div class="legend-labels">
+                    <span>Weak (-80 dBm)</span>
+                    <span>Excellent (-30 dBm)</span>
+                </div>
+            </div>
         </div>
     </div>
+
     <div id="map"></div>
     <button id="menuBtn" onclick="toggleSidebar()" aria-label="Open menu">&#9776;</button>
 
-    <script>
-        // Global error handler
-        window.addEventListener('error', function(e) {
-            console.error('Global error:', e.message, e.filename, e.lineno);
-            setStatus('Error: ' + e.message);
-        });
-        window.addEventListener('unhandledrejection', function(e) {
-            console.error('Unhandled rejection:', e.reason);
-            setStatus('Async error: ' + e.reason);
-        });
+    <div class="toast" id="toast"></div>
 
+    <script>
         var map;
         var heatmap;
         var coverageLayer;
@@ -164,23 +781,17 @@
         var locCircle = null;
 
         function initMap() {
-            console.log('initMap called');
             try {
                 map = L.map("map").setView([0, 0], 2);
-                console.log('Map created');
                 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-                    attribution: "&copy; OpenStreetMap",
+                    attribution: '&copy; OpenStreetMap',
                     maxZoom: 19,
                 }).addTo(map);
-                console.log('Tile layer added');
-                
+
                 if (typeof L.heatLayer === 'undefined') {
                     throw new Error('L.heatLayer not found - leaflet.heat plugin not loaded');
                 }
-                console.log('L.heatLayer available');
-                
                 heatmap = L.heatLayer([], { radius: 30, blur: 20, maxZoom: 18, max: 1.0 }).addTo(map);
-                console.log('Heatmap layer created');
                 coverageLayer = null;
                 detectCurrentNetwork();
             } catch (e) {
@@ -190,11 +801,21 @@
         }
 
         function setStatus(msg) {
-            document.getElementById("status").textContent = msg;
+            document.getElementById("statusText").innerHTML = msg;
+        }
+
+        function showToast(msg, duration) {
+            var t = document.getElementById("toast");
+            t.textContent = msg;
+            t.classList.add("show");
+            setTimeout(function() { t.classList.remove("show"); }, duration || 3000);
         }
 
         function toggleSidebar() {
-            document.getElementById("sidebar").classList.toggle("open");
+            var sb = document.getElementById("sidebar");
+            var ov = document.getElementById("sidebarOverlay");
+            sb.classList.toggle("open");
+            ov.classList.toggle("active");
         }
 
         function setTargetInfo(ssid, count, avgDbm) {
@@ -202,29 +823,26 @@
             var detail = "Not scanning";
             if (ssid) {
                 var strength = avgDbm > -50 ? "excellent" : avgDbm > -60 ? "good" : avgDbm > -70 ? "fair" : "weak";
-                detail = count + " readings &middot; avg " + avgDbm + " dBm &middot; " + strength;
+                detail = count + " readings \u00b7 avg " + avgDbm + " dBm \u00b7 " + strength;
             }
             document.getElementById("targetDetail").textContent = detail;
         }
 
         async function detectCurrentNetwork() {
-            console.log('detectCurrentNetwork called');
             try {
                 var resp = await fetch("/api/current");
-                console.log('/api/current response:', resp.status);
                 var data = await resp.json();
-                console.log('/api/current data:', data);
                 if (data.connected && data.ssid) {
                     document.getElementById("targetSsidFilter").value = data.ssid;
                     targetSsid = data.ssid;
                     setTargetInfo(data.ssid, 0, 0);
-                    setStatus("Server is on " + data.ssid + " — if this is YOUR network, great! Otherwise, type your SSID below.");
+                    setStatus("Server on " + data.ssid);
                 } else {
-                    setStatus("Server not on WiFi — enter your network SSID manually");
+                    setStatus("Server not on WiFi \u2014 enter SSID manually");
                 }
             } catch (e) {
                 console.error('detectCurrentNetwork error:', e);
-                setStatus('Network detection failed: ' + e.message);
+                setStatus('Network detection failed');
             }
         }
 
@@ -233,7 +851,7 @@
             if (locCircle) map.removeLayer(locCircle);
             var icon = L.divIcon({
                 className: "",
-                html: '<div style="width:18px;height:18px;background:#e94560;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 0 10px rgba(233,69,96,0.8);"></div>',
+                html: '<div style="width:18px;height:18px;background:var(--accent);border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 0 10px var(--accent-glow);"></div>',
                 iconSize: [18, 18],
                 iconAnchor: [9, 18],
                 popupAnchor: [0, -18],
@@ -242,8 +860,8 @@
             locMarker.bindPopup("<b>Your location</b><br>(" + lat.toFixed(5) + ", " + lon.toFixed(5) + ")" + (accuracyM ? "<br>Accuracy: \u00b1" + Math.round(accuracyM) + " m" : ""));
             if (accuracyM && accuracyM > 0) {
                 locCircle = L.circle([lat, lon], {
-                    radius: accuracyM, color: '#e94560', weight: 1,
-                    opacity: 0.6, fillColor: '#e94560', fillOpacity: 0.1,
+                    radius: accuracyM, color: '#7c3aed', weight: 1,
+                    opacity: 0.6, fillColor: '#7c3aed', fillOpacity: 0.1,
                 }).addTo(map);
                 var latDeg = accuracyM / 111320;
                 var lngDeg = accuracyM / (111320 * Math.cos(lat * Math.PI / 180));
@@ -255,10 +873,10 @@
 
         async function autoLocation() {
             if (!navigator.geolocation) {
-                setStatus("Geolocation is not supported by your browser");
+                setStatus("Geolocation not supported");
                 return;
             }
-            setStatus("Getting your location... allow location permission when prompted for best accuracy");
+            setStatus("Getting your location...");
             try {
                 var pos = await new Promise(function(resolve, reject) {
                     navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 20000, maximumAge: 0, enableHighAccuracy: true });
@@ -270,32 +888,15 @@
                 document.getElementById("lon").value = lon;
                 placeLocationMarker(lat, lon, acc);
                 var accTxt = acc ? " \u00b1" + Math.round(acc) + "m" : "";
-                setStatus("Location found: " + lat.toFixed(5) + ", " + lon.toFixed(5) + accTxt + (acc > 150 ? " \u2014 network-level only. Turn on GPS and retry." : ""));
+                setStatus("Location: " + lat.toFixed(5) + ", " + lon.toFixed(5) + accTxt);
+                showToast("Location acquired");
             } catch (e) {
-                console.error('geolocation error:', e);
                 var gcode = e && e.code;
-                var greason = gcode === 1 ? "location permission denied" :
-                             gcode === 2 ? "position unavailable (GPS off or indoors)" :
-                             gcode === 3 ? "timed out getting GPS" :
-                             (e && e.message ? e.message : "unknown error");
-                setStatus("GPS failed (" + greason + ") — retrying once...");
-                try {
-                    var pos2 = await new Promise(function(resolve, reject) {
-                        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 20000, maximumAge: 0, enableHighAccuracy: true });
-                    });
-                    var lat2 = pos2.coords.latitude;
-                    var lon2 = pos2.coords.longitude;
-                    var acc2 = pos2.coords.accuracy || 0;
-                    document.getElementById("lat").value = lat2;
-                    document.getElementById("lon").value = lon2;
-                    placeLocationMarker(lat2, lon2, acc2);
-                    var accTxt2 = acc2 ? " \u00b1" + Math.round(acc2) + "m" : "";
-                    setStatus("Location found: " + lat2.toFixed(5) + ", " + lon2.toFixed(5) + accTxt2 + (acc2 > 150 ? " \u2014 network-level only. Turn on GPS and retry." : ""));
-                    return;
-                } catch (e2) {
-                    console.error('geolocation retry error:', e2);
-                }
-                setStatus("GPS failed (" + greason + ") — trying IP-based location (city-level, not exact)...");
+                var greason = gcode === 1 ? "permission denied" :
+                             gcode === 2 ? "GPS unavailable" :
+                             gcode === 3 ? "timed out" :
+                             (e && e.message ? e.message : "error");
+                setStatus("GPS failed (" + greason + ") \u2014 trying IP...");
                 try {
                     var resp = await fetch("https://ipwho.is/");
                     var ipData = await resp.json();
@@ -305,41 +906,37 @@
                         document.getElementById("lat").value = ipLat;
                         document.getElementById("lon").value = ipLon;
                         placeLocationMarker(ipLat, ipLon, 0);
-                        setStatus("Location from IP (city-level, not exact). Allow location permission when prompted for a precise fix.");
+                        setStatus("Location from IP (city-level)");
+                        showToast("IP-based location found");
                     } else {
-                        setStatus("Could not determine location \u2014 enter coordinates manually");
+                        setStatus("Could not determine location");
                     }
                 } catch (ipErr) {
-                    console.error('IP location error:', ipErr);
-                    setStatus("Could not determine location \u2014 " + (ipErr && ipErr.message ? ipErr.message : "IP lookup failed") + ". Check internet and retry.");
+                    setStatus("Location failed \u2014 enter manually");
                 }
             }
         }
 
         async function doScan() {
-            console.log('doScan called');
             var lat = parseFloat(document.getElementById("lat").value);
             var lon = parseFloat(document.getElementById("lon").value);
             var filterSsid = document.getElementById("targetSsidFilter").value.trim();
 
             if (isNaN(lat) || isNaN(lon)) {
-                setStatus("Enter valid latitude and longitude, or click Auto-detect Location");
+                showToast("Enter coordinates or use Auto-detect");
                 return;
             }
 
             targetSsid = filterSsid || null;
-            setStatus("Scanning for WiFi networks...");
+            setStatus('<span class="spinner"></span> Scanning...');
 
             try {
                 var url = "/api/scan?lat=" + lat + "&lon=" + lon + (filterSsid ? "&ssid=" + encodeURIComponent(filterSsid) : "");
-                console.log('Scan URL:', url);
                 var resp = await fetch(url);
-                console.log('Scan response:', resp.status);
                 var data = await resp.json();
-                console.log('Scan data:', data);
 
                 if (data.networks.length === 0) {
-                    setStatus(data.message || ("No networks found at this location" + (filterSsid ? " for SSID '" + filterSsid + "'" : "")));
+                    setStatus(data.message || "No networks found");
                     return;
                 }
 
@@ -349,11 +946,12 @@
                 var strength = dbm > -50 ? "excellent" : dbm > -60 ? "good" : dbm > -70 ? "fair" : "weak";
 
                 setTargetInfo(ssid, data.count, dbm);
-                setStatus("Scanned " + data.count + " network(s) at (" + lat.toFixed(4) + ", " + lon.toFixed(4) + ") &mdash; " + ssid + " " + dbm + " dBm (" + strength + ")");
+                setStatus("Scanned " + data.count + " network(s) \u2014 " + ssid + " " + dbm + " dBm");
                 document.getElementById("stats").textContent = "Total scans: " + data.totalScans;
 
                 displayResults(data.networks);
                 addMarker(lat, lon, dbm, ssid, strength);
+                showToast("Scan complete \u2014 " + data.count + " networks");
             } catch (e) {
                 console.error('doScan error:', e);
                 setStatus("Scan failed: " + e.message);
@@ -361,10 +959,10 @@
         }
 
         function addMarker(lat, lon, dbm, ssid, strength) {
-            var color = strength === "excellent" ? "#0f0" : strength === "good" ? "#ff0" : strength === "fair" ? "#fa0" : "#f44";
+            var color = strength === "excellent" ? "#22c55e" : strength === "good" ? "#eab308" : strength === "fair" ? "#f97316" : "#ef4444";
             var icon = L.divIcon({
                 className: "",
-                html: '<div style="width:14px;height:14px;background:' + color + ';border-radius:50%;border:2px solid #fff;box-shadow:0 0 6px ' + color + ';"></div>',
+                html: '<div style="width:14px;height:14px;background:' + color + ';border-radius:50%;border:2px solid #fff;box-shadow:0 0 8px ' + color + ';"></div>',
                 iconSize: [14, 14],
                 iconAnchor: [7, 7],
             });
@@ -380,29 +978,22 @@
                 var div = document.createElement("div");
                 div.className = "scan-entry";
                 var rssiClass = n.signal_dbm > -50 ? "excellent" : n.signal_dbm > -60 ? "good" : n.signal_dbm > -70 ? "fair" : "weak";
-                div.innerHTML = '<span class="ssid">' + (n.ssid || "(hidden)") + '</span><span class="rssi ' + rssiClass + '">' + n.signal_dbm + ' dBm</span>';
+                div.innerHTML = '<span class="ssid">' + (n.ssid || "(hidden)") + '</span><span class="signal ' + rssiClass + '">' + n.signal_dbm + ' dBm</span>';
                 container.appendChild(div);
             });
         }
 
         async function generateCoverage() {
-            console.log('generateCoverage called');
             var filterSsid = document.getElementById("targetSsidFilter").value.trim();
-            setStatus("Generating coverage map — this may take a moment...");
+            setStatus('<span class="spinner"></span> Generating coverage map...');
 
             try {
                 var url = "/api/coverage?ssid=" + encodeURIComponent(filterSsid) + "&step=0.00005&power=2&radius=0.005";
-                console.log('Coverage URL:', url);
                 var resp = await fetch(url);
-                console.log('Coverage response:', resp.status);
                 var data = await resp.json();
-                console.log('Coverage data:', data);
 
                 if (data.grid.length === 0) {
                     setStatus(data.message || "No data for coverage map");
-                    document.getElementById("coverage-summary").innerHTML =
-                        '<strong>No coverage data yet</strong><br>' + (data.message || "") +
-                        '<br>This website cannot scan WiFi. Collect scans with the <strong>NetRange phone app</strong> (Expo Go), then try again.';
                     return;
                 }
 
@@ -430,26 +1021,27 @@
                 var total = grid.length;
 
                 document.getElementById("coverage-stats").innerHTML =
-                    '<strong>Coverage Statistics</strong><br>' +
-                    '<div class="coverage-stat"><span class="label">Grid points:</span><span class="value">' + total + '</span></div>' +
-                    '<div class="coverage-stat"><span class="label">Min signal:</span><span class="value">' + stats.min + ' dBm</span></div>' +
-                    '<div class="coverage-stat"><span class="label">Max signal:</span><span class="value">' + stats.max + ' dBm</span></div>' +
-                    '<div class="coverage-stat"><span class="label">Avg signal:</span><span class="value">' + stats.avg + ' dBm</span></div>' +
-                    '<div class="coverage-stat"><span class="label">Excellent:</span><span class="value">' + Math.round(excellent/total*100) + '%</span></div>' +
-                    '<div class="coverage-stat"><span class="label">Good:</span><span class="value">' + Math.round(good/total*100) + '%</span></div>' +
-                    '<div class="coverage-stat"><span class="label">Fair:</span><span class="value">' + Math.round(fair/total*100) + '%</span></div>' +
-                    '<div class="coverage-stat"><span class="label">Weak:</span><span class="value">' + Math.round(weak/total*100) + '%</span></div>';
+                    '<div class="stat-row"><span class="stat-label">Grid points</span><span class="stat-value">' + total + '</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Min signal</span><span class="stat-value">' + stats.min + ' dBm</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Max signal</span><span class="stat-value">' + stats.max + ' dBm</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Avg signal</span><span class="stat-value">' + stats.avg + ' dBm</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Excellent</span><span class="stat-value" style="color:var(--green)">' + Math.round(excellent/total*100) + '%</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Good</span><span class="stat-value" style="color:var(--yellow)">' + Math.round(good/total*100) + '%</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Fair</span><span class="stat-value" style="color:var(--orange)">' + Math.round(fair/total*100) + '%</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Weak</span><span class="stat-value" style="color:var(--red)">' + Math.round(weak/total*100) + '%</span></div>';
 
                 document.getElementById("coverage-summary").innerHTML =
-                    '<span class="coverage-badge excellent">' + excellent + ' excellent</span> ' +
-                    '<span class="coverage-badge good">' + good + ' good</span> ' +
-                    '<span class="coverage-badge fair">' + fair + ' fair</span> ' +
+                    '<span class="coverage-badge excellent">' + excellent + ' excellent</span>' +
+                    '<span class="coverage-badge good">' + good + ' good</span>' +
+                    '<span class="coverage-badge fair">' + fair + ' fair</span>' +
                     '<span class="coverage-badge weak">' + weak + ' weak</span>';
 
-                setStatus("Coverage map generated — " + total + " interpolated points");
+                document.getElementById("coverage-stats-card").style.display = "block";
+                setStatus("Coverage generated \u2014 " + total + " points");
+                showToast("Coverage map ready");
             } catch (e) {
                 console.error('generateCoverage error:', e);
-                setStatus("Coverage generation failed: " + e.message);
+                setStatus("Coverage failed: " + e.message);
             }
         }
 
@@ -466,74 +1058,71 @@
             document.getElementById("stats").textContent = "";
             document.getElementById("coverage-summary").innerHTML = "";
             document.getElementById("coverage-stats").innerHTML = "";
+            document.getElementById("coverage-stats-card").style.display = "none";
             setTargetInfo(null, 0, 0);
-            setStatus("Coverage map cleared");
+            setStatus("Cleared");
+            showToast("Map cleared");
         }
 
         async function loadCoverage() {
-            console.log('loadCoverage called');
             var filterSsid = document.getElementById("targetSsidFilter").value.trim();
             try {
                 var url = "/api/coverage?ssid=" + encodeURIComponent(filterSsid) + "&step=0.00005&power=2&radius=0.005";
-                console.log('Load coverage URL:', url);
                 var resp = await fetch(url);
-                console.log('Load coverage response:', resp.status);
                 var data = await resp.json();
-                console.log('Load coverage data:', data);
                 if (data.grid && data.grid.length > 0) {
                     var points = data.grid.map(function(p) { return [p.lat, p.lng, p.weight]; });
                     map.removeLayer(heatmap);
                     heatmap = L.heatLayer(points, { radius: 35, blur: 25, maxZoom: 18, max: 1.0 }).addTo(map);
                     var bounds = L.latLngBounds(points.map(function(p) { return [p[0], p[1]]; }));
                     map.fitBounds(bounds, { padding: [50, 50] });
-                    setStatus("Coverage loaded — " + data.grid.length + " points");
+                    setStatus("Loaded " + data.grid.length + " points");
                 }
             } catch (e) {
                 console.error('loadCoverage error:', e);
-                setStatus("Failed to load coverage: " + e.message);
+                setStatus("Failed to load coverage");
             }
         }
 
         async function scanNetworks() {
-            console.log('scanNetworks called');
-            setStatus("Scanning for available networks...");
+            setStatus('<span class="spinner"></span> Scanning networks...');
             var container = document.getElementById("networkList");
             container.style.display = "block";
-            container.innerHTML = "Scanning...";
+            container.innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-muted)"><span class="spinner"></span></div>';
 
             try {
                 var resp = await fetch("/api/networks");
-                console.log('/api/networks response:', resp.status);
                 var data = await resp.json();
-                console.log('Networks:', data);
 
                 if (!data.networks || data.networks.length === 0) {
-                    container.innerHTML = data.message || "No networks found";
+                    container.innerHTML = '<div style="text-align:center;padding:12px;color:var(--text-muted);font-size:0.85em">' + (data.message || "No networks found") + '</div>';
                     setStatus(data.message || "No networks found");
                     return;
                 }
 
-                var html = '<strong>Available Networks (click to select):</strong><br>';
+                var html = '';
                 data.networks.forEach(function(n) {
                     var strength = n.signal_dbm > -50 ? "excellent" : n.signal_dbm > -60 ? "good" : n.signal_dbm > -70 ? "fair" : "weak";
-                    html += '<div style="padding:6px; margin:3px 0; background:#0f3460; border-radius:4px; cursor:pointer; display:flex; justify-content:space-between; align-items:center;" onclick="selectNetwork(\'' + (n.ssid || 'hidden').replace(/'/g, "\\'") + '\')">';
+                    var ssid = (n.ssid || '(hidden)').replace(/'/g, "\\'");
+                    html += '<div class="network-item" onclick="selectNetwork(\'' + ssid + '\')">';
                     html += '<span class="ssid">' + (n.ssid || '(hidden)') + '</span>';
-                    html += '<span class="rssi ' + strength + '">' + n.signal_dbm + ' dBm</span>';
+                    html += '<span class="signal ' + strength + '">' + n.signal_dbm + ' dBm</span>';
                     html += '</div>';
                 });
                 container.innerHTML = html;
-                setStatus("Found " + data.networks.length + " networks — click one to select");
+                setStatus("Found " + data.networks.length + " networks");
             } catch (e) {
                 console.error('scanNetworks error:', e);
-                container.innerHTML = "Scan failed: " + e.message;
-                setStatus("Network scan failed: " + e.message);
+                container.innerHTML = '<div style="text-align:center;padding:12px;color:var(--red);font-size:0.85em">Scan failed</div>';
+                setStatus("Network scan failed");
             }
         }
 
         function selectNetwork(ssid) {
             document.getElementById("targetSsidFilter").value = ssid;
             document.getElementById("networkList").style.display = "none";
-            setStatus("Target set to: " + ssid);
+            showToast("Target: " + ssid);
+            setStatus("Target set to " + ssid);
         }
 
         if (document.readyState === 'loading') {

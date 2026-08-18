@@ -16,6 +16,11 @@ APK_URL = "https://github.com/Ashonlogist/NetRange/releases/latest/download/netr
 
 @app.route("/")
 def index():
+    return render_template("landing.html")
+
+
+@app.route("/map")
+def map_view():
     return render_template("map.html")
 
 

@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetRange — Campus WiFi Coverage Mapping</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --glass-bg: rgba(12, 15, 30, 0.6);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --accent: #7c3aed;
+            --accent-glow: rgba(124, 58, 237, 0.4);
+            --accent-2: #06b6d4;
+            --gradient: linear-gradient(135deg, #7c3aed, #06b6d4);
+            --gradient-warm: linear-gradient(135deg, #f43f5e, #f59e0b);
+            --text-primary: rgba(255, 255, 255, 0.95);
+            --text-secondary: rgba(255, 255, 255, 0.6);
+            --text-muted: rgba(255, 255, 255, 0.35);
+            --surface: rgba(255, 255, 255, 0.05);
+            --surface-hover: rgba(255, 255, 255, 0.08);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #070a14;
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+            overflow-x: hidden;
+        }
+
+        /* ===== ANIMATED BACKGROUND ===== */
+        .bg-canvas {
+            position: fixed;
+            inset: 0;
+            z-index: 0;
+            overflow: hidden;
+        }
+        .bg-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(100px);
+            opacity: 0.3;
+            animation: float 20s ease-in-out infinite;
+        }
+        .bg-orb:nth-child(1) {
+            width: 600px; height: 600px;
+            background: #7c3aed;
+            top: -200px; left: -100px;
+            animation-delay: 0s;
+        }
+        .bg-orb:nth-child(2) {
+            width: 500px; height: 500px;
+            background: #06b6d4;
+            bottom: -200px; right: -100px;
+            animation-delay: -7s;
+        }
+        .bg-orb:nth-child(3) {
+            width: 400px; height: 400px;
+            background: #f43f5e;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            animation-delay: -14s;
+            opacity: 0.15;
+        }
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(60px, -40px) scale(1.1); }
+            66% { transform: translate(-40px, 30px) scale(0.9); }
+        }
+
+        /* ===== NAV ===== */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            padding: 20px 40px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            background: rgba(7, 10, 20, 0.7);
+            border-bottom: 1px solid var(--glass-border);
+        }
+        .nav-brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .nav-icon {
+            width: 36px;
+            height: 36px;
+            background: var(--gradient);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.1em;
+            box-shadow: 0 4px 16px var(--accent-glow);
+        }
+        .nav-title {
+            font-size: 1.2em;
+            font-weight: 700;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .nav-links {
+            display: flex;
+            align-items: center;
+            gap: 32px;
+        }
+        .nav-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.9em;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+        .nav-links a:hover { color: var(--text-primary); }
+        .nav-cta {
+            padding: 10px 24px;
+            background: var(--gradient);
+            color: white !important;
+            border-radius: 10px;
+            font-weight: 600;
+            box-shadow: 0 4px 20px var(--accent-glow);
+            transition: box-shadow 0.2s, transform 0.2s;
+        }
+        .nav-cta:hover {
+            box-shadow: 0 8px 32px var(--accent-glow);
+            transform: translateY(-1px);
+        }
+
+        /* ===== HERO ===== */
+        .hero {
+            position: relative;
+            z-index: 1;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 120px 40px 80px;
+            text-align: center;
+        }
+        .hero-content { max-width: 720px; }
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--surface);
+            border: 1px solid var(--glass-border);
+            border-radius: 100px;
+            font-size: 0.8em;
+            color: var(--text-secondary);
+            margin-bottom: 28px;
+            backdrop-filter: blur(12px);
+        }
+        .hero-badge .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #22c55e;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .hero h1 {
+            font-size: clamp(2.5em, 6vw, 4em);
+            font-weight: 800;
+            line-height: 1.1;
+            letter-spacing: -0.03em;
+            margin-bottom: 20px;
+        }
+        .hero h1 .gradient {
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero p {
+            font-size: 1.15em;
+            color: var(--text-secondary);
+            line-height: 1.7;
+            margin-bottom: 40px;
+            max-width: 560px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .hero-actions {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .hero-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 16px 32px;
+            border-radius: 14px;
+            font-family: inherit;
+            font-size: 1em;
+            font-weight: 600;
+            text-decoration: none;
+            transition: all 0.25s;
+            border: none;
+            cursor: pointer;
+        }
+        .hero-btn.primary {
+            background: var(--gradient);
+            color: white;
+            box-shadow: 0 8px 32px var(--accent-glow);
+        }
+        .hero-btn.primary:hover {
+            box-shadow: 0 12px 48px var(--accent-glow);
+            transform: translateY(-2px);
+        }
+        .hero-btn.secondary {
+            background: var(--surface);
+            color: var(--text-primary);
+            border: 1px solid var(--glass-border);
+            backdrop-filter: blur(12px);
+        }
+        .hero-btn.secondary:hover {
+            background: var(--surface-hover);
+            border-color: rgba(255,255,255,0.15);
+            transform: translateY(-2px);
+        }
+
+        /* ===== HERO VISUAL ===== */
+        .hero-visual {
+            position: relative;
+            margin-top: 60px;
+            max-width: 900px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        .visual-frame {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 3px;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 20px 80px rgba(0,0,0,0.5), 0 0 60px var(--accent-glow);
+        }
+        .visual-inner {
+            background: #0d1117;
+            border-radius: 18px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+        .visual-map-placeholder {
+            width: 100%;
+            height: 100%;
+            background:
+                radial-gradient(circle at 30% 40%, rgba(34,197,94,0.25) 0%, transparent 40%),
+                radial-gradient(circle at 60% 60%, rgba(234,179,8,0.2) 0%, transparent 35%),
+                radial-gradient(circle at 70% 30%, rgba(239,68,68,0.15) 0%, transparent 30%),
+                radial-gradient(circle at 45% 55%, rgba(6,182,212,0.2) 0%, transparent 40%),
+                linear-gradient(135deg, #0d1117, #111827);
+            position: relative;
+        }
+        .grid-lines {
+            position: absolute;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+        .visual-pin {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            border: 2px solid white;
+            box-shadow: 0 0 12px currentColor;
+            animation: pinPulse 3s ease-in-out infinite;
+        }
+        .visual-pin:nth-child(2) { top: 35%; left: 28%; color: #22c55e; background: #22c55e; animation-delay: 0s; }
+        .visual-pin:nth-child(3) { top: 55%; left: 55%; color: #eab308; background: #eab308; animation-delay: -1s; }
+        .visual-pin:nth-child(4) { top: 40%; left: 68%; color: #ef4444; background: #ef4444; animation-delay: -2s; }
+        .visual-pin:nth-child(5) { top: 60%; left: 35%; color: #22c55e; background: #22c55e; animation-delay: -0.5s; }
+        .visual-pin:nth-child(6) { top: 30%; left: 50%; color: #06b6d4; background: #06b6d4; animation-delay: -1.5s; }
+        @keyframes pinPulse {
+            0%, 100% { transform: scale(1); box-shadow: 0 0 12px currentColor; }
+            50% { transform: scale(1.3); box-shadow: 0 0 24px currentColor; }
+        }
+
+        /* ===== FEATURES ===== */
+        .features {
+            position: relative;
+            z-index: 1;
+            padding: 100px 40px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .section-header {
+            text-align: center;
+            margin-bottom: 64px;
+        }
+        .section-header h2 {
+            font-size: clamp(1.8em, 4vw, 2.5em);
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            margin-bottom: 12px;
+        }
+        .section-header p {
+            color: var(--text-secondary);
+            font-size: 1.05em;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .feature-card {
+            background: var(--surface);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 32px;
+            backdrop-filter: blur(12px);
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .feature-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+        }
+        .feature-card:hover {
+            background: var(--surface-hover);
+            border-color: rgba(255,255,255,0.12);
+            transform: translateY(-4px);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+        }
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4em;
+            margin-bottom: 20px;
+        }
+        .feature-icon.purple { background: rgba(124,58,237,0.15); }
+        .feature-icon.cyan { background: rgba(6,182,212,0.15); }
+        .feature-icon.green { background: rgba(34,197,94,0.15); }
+        .feature-icon.orange { background: rgba(249,115,22,0.15); }
+        .feature-icon.red { background: rgba(239,68,68,0.15); }
+        .feature-icon.pink { background: rgba(244,63,94,0.15); }
+        .feature-card h3 {
+            font-size: 1.1em;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .feature-card p {
+            color: var(--text-secondary);
+            font-size: 0.9em;
+            line-height: 1.6;
+        }
+
+        /* ===== HOW IT WORKS ===== */
+        .how-it-works {
+            position: relative;
+            z-index: 1;
+            padding: 100px 40px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        .steps {
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            margin-top: 48px;
+        }
+        .step {
+            display: flex;
+            gap: 24px;
+            align-items: flex-start;
+            background: var(--surface);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 28px;
+            backdrop-filter: blur(12px);
+            transition: all 0.3s;
+        }
+        .step:hover {
+            background: var(--surface-hover);
+            border-color: rgba(255,255,255,0.12);
+        }
+        .step-num {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: var(--gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1em;
+            font-weight: 700;
+            flex-shrink: 0;
+            box-shadow: 0 4px 16px var(--accent-glow);
+        }
+        .step-content h3 {
+            font-size: 1.05em;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+        .step-content p {
+            color: var(--text-secondary);
+            font-size: 0.9em;
+            line-height: 1.6;
+        }
+
+        /* ===== STATS ===== */
+        .stats-section {
+            position: relative;
+            z-index: 1;
+            padding: 80px 40px;
+        }
+        .stats-bar {
+            max-width: 800px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+        }
+        .stat-item {
+            text-align: center;
+            padding: 32px 20px;
+            background: var(--surface);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            backdrop-filter: blur(12px);
+        }
+        .stat-number {
+            font-size: 2.2em;
+            font-weight: 800;
+            background: var(--gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .stat-label {
+            color: var(--text-muted);
+            font-size: 0.85em;
+            margin-top: 4px;
+        }
+
+        /* ===== CTA ===== */
+        .cta-section {
+            position: relative;
+            z-index: 1;
+            padding: 100px 40px;
+            text-align: center;
+        }
+        .cta-card {
+            max-width: 700px;
+            margin: 0 auto;
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 60px 48px;
+            backdrop-filter: blur(24px);
+            position: relative;
+            overflow: hidden;
+        }
+        .cta-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+        }
+        .cta-card h2 {
+            font-size: 2em;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+        .cta-card p {
+            color: var(--text-secondary);
+            margin-bottom: 32px;
+            font-size: 1.05em;
+        }
+
+        /* ===== FOOTER ===== */
+        footer {
+            position: relative;
+            z-index: 1;
+            padding: 40px;
+            text-align: center;
+            border-top: 1px solid var(--glass-border);
+            color: var(--text-muted);
+            font-size: 0.85em;
+        }
+        footer a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        footer a:hover { color: var(--text-primary); }
+
+        /* ===== MOBILE ===== */
+        @media (max-width: 768px) {
+            nav { padding: 16px 20px; }
+            .nav-links { display: none; }
+            .hero { padding: 100px 20px 60px; }
+            .hero-actions { flex-direction: column; align-items: center; }
+            .hero-btn { width: 100%; max-width: 300px; justify-content: center; }
+            .features, .how-it-works, .cta-section { padding: 60px 20px; }
+            .features-grid { grid-template-columns: 1fr; }
+            .stats-bar { grid-template-columns: 1fr; }
+            .cta-card { padding: 40px 24px; }
+            .step { flex-direction: column; gap: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-canvas">
+        <div class="bg-orb"></div>
+        <div class="bg-orb"></div>
+        <div class="bg-orb"></div>
+    </div>
+
+    <nav>
+        <div class="nav-brand">
+            <div class="nav-icon">&#128225;</div>
+            <span class="nav-title">NetRange</span>
+        </div>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#how">How It Works</a>
+            <a href="/map" class="nav-cta">Open Map</a>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-content">
+            <div class="hero-badge">
+                <span class="dot"></span>
+                Open-source campus coverage tool
+            </div>
+            <h1>Map Your<br><span class="gradient">WiFi Coverage</span></h1>
+            <p>Scan signal strength at GPS-tagged locations on your phone, push scans to the backend, and view an interpolated coverage heatmap on an interactive map.</p>
+            <div class="hero-actions">
+                <a href="/map" class="hero-btn primary">
+                    &#127758; Open Coverage Map
+                </a>
+                <a href="https://github.com/Ashonlogist/NetRange/releases/latest/download/netrange.apk" class="hero-btn secondary" target="_blank" rel="noopener">
+                    &#11015; Download Android App
+                </a>
+            </div>
+
+            <div class="hero-visual">
+                <div class="visual-frame">
+                    <div class="visual-inner">
+                        <div class="visual-map-placeholder">
+                            <div class="grid-lines"></div>
+                            <div class="visual-pin"></div>
+                            <div class="visual-pin"></div>
+                            <div class="visual-pin"></div>
+                            <div class="visual-pin"></div>
+                            <div class="visual-pin"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="features" id="features">
+        <div class="section-header">
+            <h2>Everything You Need</h2>
+            <p>From scanning to visualization, NetRange covers the full workflow.</p>
+        </div>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon purple">&#128225;</div>
+                <h3>WiFi Scanning</h3>
+                <p>Capture all visible networks with BSSID, signal strength, channel, and frequency at each GPS-tagged location.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon cyan">&#128205;</div>
+                <h3>GPS Tagging</h3>
+                <p>Every scan is automatically tagged with precise GPS coordinates for accurate spatial mapping.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon green">&#127758;</div>
+                <h3>Coverage Heatmap</h3>
+                <p>IDW-interpolated coverage grid visualizes signal strength across your campus with color-coded accuracy.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon orange">&#128241;</div>
+                <h3>Mobile + Web</h3>
+                <p>Scan on Android, view on any device. The web dashboard embeds the same interactive Leaflet map.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon red">&#128202;</div>
+                <h3>Signal Analytics</h3>
+                <p>Track excellent, good, fair, and weak coverage zones with real-time statistics and percentage breakdowns.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon pink">&#128640;</div>
+                <h3>Auto-Deploy</h3>
+                <p>Backend on Render, web on Netlify, app on EAS. Push to GitHub and everything deploys automatically.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="how-it-works" id="how">
+        <div class="section-header">
+            <h2>How It Works</h2>
+            <p>Three steps to map your campus WiFi.</p>
+        </div>
+        <div class="steps">
+            <div class="step">
+                <div class="step-num">1</div>
+                <div class="step-content">
+                    <h3>Install & Scan</h3>
+                    <p>Download the Android app, walk around your campus, and scan WiFi networks at different locations. Each scan captures signal strength and GPS coordinates.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-content">
+                    <h3>Sync to Server</h3>
+                    <p>Scans are automatically synced to the Flask backend via REST API. Data is stored and deduplicated by BSSID at each location.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-content">
+                    <h3>Visualize Coverage</h3>
+                    <p>Open the coverage map, select your network's SSID, and generate an interpolated heatmap showing signal strength across your campus.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="stats-section">
+        <div class="stats-bar">
+            <div class="stat-item">
+                <div class="stat-number">IDW</div>
+                <div class="stat-label">Interpolation Algorithm</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">&lt;1s</div>
+                <div class="stat-label">Scan-to-Server Sync</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-number">100%</div>
+                <div class="stat-label">Open Source</div>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta-section">
+        <div class="cta-card">
+            <h2>Ready to Map Your Campus?</h2>
+            <p>Start scanning WiFi coverage today. The app is free and open-source.</p>
+            <div class="hero-actions">
+                <a href="/map" class="hero-btn primary">
+                    &#127758; Open Coverage Map
+                </a>
+                <a href="https://github.com/Ashonlogist/NetRange" class="hero-btn secondary" target="_blank" rel="noopener">
+                    &#128187; View on GitHub
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <p>NetRange &mdash; Campus WiFi Coverage Mapping &mdash; <a href="https://github.com/Ashonlogist/NetRange" target="_blank" rel="noopener">GitHub</a> &mdash; <a href="/map">Map</a></p>
+    </footer>
+</body>
+</html>
