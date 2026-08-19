@@ -840,6 +840,16 @@
     <div class="toast" id="toast"></div>
 
     <script>
+        var isApp = new URLSearchParams(window.location.search).get('app') === '1';
+        if (isApp) {
+            document.addEventListener('DOMContentLoaded', function() {
+                var banner = document.getElementById('noDataBanner');
+                var dlBtn = document.querySelector('.btn-download');
+                if (banner) banner.style.display = 'none';
+                if (dlBtn) dlBtn.style.display = 'none';
+            });
+        }
+
         var map;
         var heatmap;
         var coverageLayer;

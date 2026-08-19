@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Switch, Platform, Alert, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Header, Card, Button, Input, StatRow, T } from '@/components/UI';
+import { Header, Card, Button, StatRow, T } from '@/components/UI';
 import { useApp } from '@/components/Providers';
 import { useUpdater } from '@/components/Updater';
 import * as SecureStore from 'expo-secure-store';
 
 export default function SettingsScreen() {
-  const { apiUrl, setApiUrl, deviceId, isOnline } = useApp();
+  const { apiUrl, deviceId, isOnline } = useApp();
   const updater = useUpdater();
   const [interpolationStep, setInterpolationStep] = useState('0.00005');
   const [interpolationPower, setInterpolationPower] = useState('2');
@@ -56,26 +56,7 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
-      <Header title="Settings" subtitle="Configure API and interpolation" />
-
-      {/* Server */}
-      <Card glow>
-        <View style={s.cardHeader}>
-          <View style={[s.iconWrap, { backgroundColor: 'rgba(124,58,237,0.15)' }]}>
-            <Ionicons name="server-outline" size={18} color={T.accent} />
-          </View>
-          <Text style={s.cardTitle}>Server</Text>
-        </View>
-        <Input
-          label="API Base URL"
-          value={apiUrl}
-          onChangeText={setApiUrl}
-          placeholder="https://netrange-backend.onrender.com"
-        />
-        <Text style={s.helpText}>
-          Default is the hosted Render backend. Use a LAN IP for local dev.
-        </Text>
-      </Card>
+      <Header title="Settings" subtitle="Configure interpolation and sync" />
 
       {/* Interpolation */}
       <Card>

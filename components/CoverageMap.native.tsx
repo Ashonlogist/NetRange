@@ -8,8 +8,9 @@ import { useApp } from '@/components/Providers';
 export default function CoverageMap() {
   const { apiUrl } = useApp();
   const { ssid } = useLocalSearchParams<{ ssid?: string }>();
-  const ssidParam = ssid ? `?ssid=${encodeURIComponent(ssid)}` : '';
-  const url = `${apiUrl}/map${ssidParam}`;
+  const ssidParam = ssid ? `ssid=${encodeURIComponent(ssid)}` : '';
+  const params = [ssidParam, 'app=1'].filter(Boolean).join('&');
+  const url = `${apiUrl}/map?${params}`;
 
   return (
     <View style={styles.container}>

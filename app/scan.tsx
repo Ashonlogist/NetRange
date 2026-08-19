@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,13 +6,13 @@ import {
   StyleSheet,
   Platform,
   Alert,
-  ActivityIndicator,
+  TouchableOpacity,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import NetInfo from '@react-native-community/netinfo';
-import { Header, Card, Button, Input, Badge, T } from '@/components/UI';
+import { Header, Card, Button, Badge, T } from '@/components/UI';
 import { useApp } from '@/components/Providers';
 
 interface WifiNetwork {
@@ -73,7 +73,6 @@ export default function ScanScreen() {
     setError('');
 
     try {
-      // Ensure permission first
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         setError('Location permission denied. Enable it in settings.');
@@ -81,26 +80,20 @@ export default function ScanScreen() {
         return;
       }
 
-      // Get location with fallback
       let loc: Location.LocationObject;
       try {
-        loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
+        loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       } catch {
-        // High accuracy failed, try balanced
-        loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
+        loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       }
       setCurrentLocation(loc.coords);
 
-      // Scan WiFi (Android only)
       let wifi: WifiNetwork[] = [];
       if (Platform.OS === 'android') {
         try {
           const WifiManager = require('react-native-wifi-reborn').default;
           const networks = await WifiManager.loadWifiList();
+          const connectedSsid = await WifiManager.getCurrentWifiSSID().catch(() => '');
           wifi = networks
             .map((n: any) => ({
               ssid: n.SSID || 'hidden',
@@ -110,31 +103,38 @@ export default function ScanScreen() {
               channel: n.frequency
                 ? Math.round((n.frequency - 2407) / 5)
                 : undefined,
-              isConnected: false,
+              isConnected: (n.SSID || '') === connectedSsid,
             }))
             .sort((a: WifiNetwork, b: WifiNetwork) => b.strength - a.strength);
         } catch (e: any) {
           const msg = e?.message || 'WiFi scan failed';
           if (msg === 'locationServicesOff') {
-            setError('WiFi scanning needs Location Services ON. Enable in phone settings.');
+            setError('WiFi scanning needs Location Services ON.');
           } else if (msg === 'locationPermissionMissing') {
-            setError('Location permission is required for WiFi scanning.');
+            setError('Location permission required for WiFi scanning.');
           } else {
             setError(`WiFi scan: ${msg}`);
           }
         }
       }
 
-      // Get cellular info
       let cellular: CellularInfo | null = null;
       try {
         const netInfo = await NetInfo.fetch();
-        if (netInfo.type === 'cellular' && netInfo.details) {
+        if (netInfo.type === 'cellular') {
+          const d = netInfo.details as any;
           cellular = {
-            carrier: (netInfo.details as any).carrier || 'Unknown',
-            signalStrength: undefined,
-            networkType: (netInfo.details as any).cellularGeneration || 'Unknown',
+            carrier: d.carrier || d.mobileCarrier || d.networkName || 'Cellular',
+            signalStrength: d.strength ?? d.signalStrength ?? undefined,
+            networkType: d.cellularGeneration || d.type || 'Unknown',
             isConnected: netInfo.isConnected || false,
+          };
+        } else if (netInfo.isConnected) {
+          cellular = {
+            carrier: netInfo.type === 'wifi' ? 'Connected via WiFi' : netInfo.type,
+            signalStrength: undefined,
+            networkType: netInfo.type,
+            isConnected: true,
           };
         }
       } catch {
@@ -144,13 +144,12 @@ export default function ScanScreen() {
       setWifiNetworks(wifi);
       setCellularInfo(cellular);
 
-      const result: ScanResult = {
+      setLastScan({
         wifi,
         cellular,
         location: loc.coords,
         timestamp: new Date().toISOString(),
-      };
-      setLastScan(result);
+      });
     } catch (e: any) {
       setError(e.message || 'Scan failed');
     } finally {
@@ -160,12 +159,11 @@ export default function ScanScreen() {
 
   const handleSelectNetwork = (ssid: string) => {
     setTargetSsid(ssid);
-    Alert.alert('Target Set', `Now mapping: ${ssid}`);
   };
 
   const handleSaveScan = async () => {
     if (!lastScan) return Alert.alert('No Data', 'Scan first');
-    if (!targetSsid) return Alert.alert('No Target', 'Select a network SSID first');
+    if (!targetSsid) return Alert.alert('No Target', 'Tap a network to select it as target');
 
     setSaving(true);
     try {
@@ -173,9 +171,12 @@ export default function ScanScreen() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...lastScan,
+          wifi: lastScan.wifi,
+          cellular: lastScan.cellular,
+          location: lastScan.location,
           targetSsid,
           deviceId,
+          timestamp: lastScan.timestamp,
         }),
       });
 
@@ -195,11 +196,10 @@ export default function ScanScreen() {
   };
 
   const handleGenerateCoverage = () => {
-    if (!targetSsid) return Alert.alert('No Target', 'Select a network SSID first');
+    if (!targetSsid) return Alert.alert('No Target', 'Tap a network to select it first');
     router.push(`/map?ssid=${encodeURIComponent(targetSsid)}`);
   };
 
-  // ── Web mode ───────────────────────────────────────────
   if (Platform.OS === 'web') {
     return (
       <ScrollView style={s.container} contentContainerStyle={s.content}>
@@ -211,21 +211,16 @@ export default function ScanScreen() {
             Browsers cannot access WiFi hardware. Download the NetRange app to scan networks and sync data to the server.
           </Text>
         </Card>
-        <Button
-          title="Open Coverage Map"
-          onPress={() => router.push('/map')}
-          variant="secondary"
-        />
+        <Button title="Open Coverage Map" onPress={() => router.push('/map')} variant="secondary" />
       </ScrollView>
     );
   }
 
-  // ── Native mode ────────────────────────────────────────
   return (
     <ScrollView style={s.container} contentContainerStyle={s.content}>
       <Header
         title="Scan Networks"
-        subtitle={scanning ? 'Scanning...' : 'Tap to scan at current location'}
+        subtitle={scanning ? 'Scanning...' : 'Tap a network to select, then save'}
       />
 
       {error ? (
@@ -243,59 +238,86 @@ export default function ScanScreen() {
         icon={scanning ? undefined : '📡'}
       />
 
-      {/* WiFi Networks */}
+      {targetSsid ? (
+        <Card style={s.targetCard}>
+          <View style={s.targetRow}>
+            <Ionicons name="checkmark-circle" size={18} color={T.green} />
+            <Text style={s.targetLabel}>Target:</Text>
+            <Text style={s.targetValue}>{targetSsid}</Text>
+            <TouchableOpacity onPress={() => setTargetSsid('')} style={s.clearBtn}>
+              <Ionicons name="close-circle" size={18} color={T.textMuted} />
+            </TouchableOpacity>
+          </View>
+        </Card>
+      ) : null}
+
       {wifiNetworks.length > 0 && (
         <>
           <Text style={s.sectionTitle}>WiFi Networks ({wifiNetworks.length})</Text>
-          {wifiNetworks.map((net, i) => (
-            <Card
-              key={`${net.bssid}-${i}`}
-              onPress={() => handleSelectNetwork(net.ssid)}
-              style={s.networkCard}
-            >
-              <View style={s.networkRow}>
-                <View style={s.networkInfo}>
-                  <View style={s.networkNameRow}>
-                    <Text style={s.networkSsid} numberOfLines={1}>
-                      {net.ssid}
-                    </Text>
-                    {net.isConnected && <Badge label="Connected" variant="success" />}
+          {wifiNetworks.map((net, i) => {
+            const selected = targetSsid === net.ssid;
+            return (
+              <TouchableOpacity
+                key={`${net.bssid}-${i}`}
+                onPress={() => handleSelectNetwork(net.ssid)}
+                activeOpacity={0.7}
+              >
+                <Card style={[s.networkCard, selected && s.networkCardSelected]}>
+                  <View style={s.networkRow}>
+                    <View style={s.networkInfo}>
+                      <View style={s.networkNameRow}>
+                        {selected && <Ionicons name="checkmark-circle" size={14} color={T.green} />}
+                        <Text style={[s.networkSsid, selected && { color: T.green }]} numberOfLines={1}>
+                          {net.ssid}
+                        </Text>
+                        {net.isConnected && <Badge label="Connected" variant="success" />}
+                      </View>
+                      <Text style={s.networkMeta}>
+                        {net.bssid} · Ch {net.channel || '?'} · {net.frequency} MHz
+                      </Text>
+                    </View>
+                    <View style={s.signalCol}>
+                      <Text style={[s.signalDbm, { color: signalColor(net.strength) }]}>
+                        {net.strength}
+                      </Text>
+                      <Badge label={signalLabel(net.strength)} variant={net.strength > -50 ? 'success' : net.strength > -60 ? 'warning' : 'danger'} />
+                    </View>
                   </View>
-                  <Text style={s.networkMeta}>
-                    {net.bssid} · Ch {net.channel || '?'} · {net.frequency} MHz
-                  </Text>
-                </View>
-                <View style={s.signalCol}>
-                  <Text style={[s.signalDbm, { color: signalColor(net.strength) }]}>
-                    {net.strength}
-                  </Text>
-                  <Badge label={signalLabel(net.strength)} variant={net.strength > -50 ? 'success' : net.strength > -60 ? 'warning' : 'danger'} />
-                </View>
-              </View>
-            </Card>
-          ))}
+                </Card>
+              </TouchableOpacity>
+            );
+          })}
         </>
       )}
 
-      {/* Cellular */}
       {cellularInfo && (
         <>
           <Text style={s.sectionTitle}>Cellular</Text>
-          <Card>
-            <View style={s.networkRow}>
-              <View style={s.networkInfo}>
-                <Text style={s.networkSsid}>{cellularInfo.carrier}</Text>
-                <Text style={s.networkMeta}>
-                  {cellularInfo.networkType} · Signal: {cellularInfo.signalStrength ?? 'n/a'}
-                </Text>
+          <TouchableOpacity
+            onPress={() => handleSelectNetwork(cellularInfo.carrier)}
+            activeOpacity={0.7}
+          >
+            <Card style={[s.networkCard, targetSsid === cellularInfo.carrier && s.networkCardSelected]}>
+              <View style={s.networkRow}>
+                <View style={s.networkInfo}>
+                  <View style={s.networkNameRow}>
+                    {targetSsid === cellularInfo.carrier && <Ionicons name="checkmark-circle" size={14} color={T.green} />}
+                    <Text style={[s.networkSsid, targetSsid === cellularInfo.carrier && { color: T.green }]}>
+                      {cellularInfo.carrier}
+                    </Text>
+                    {cellularInfo.isConnected && <Badge label="Connected" variant="success" />}
+                  </View>
+                  <Text style={s.networkMeta}>
+                    {cellularInfo.networkType} · Signal: {cellularInfo.signalStrength ?? 'n/a'}
+                  </Text>
+                </View>
+                <Badge label={cellularInfo.isConnected ? 'Online' : 'Offline'} variant={cellularInfo.isConnected ? 'success' : 'danger'} />
               </View>
-              <Badge label={cellularInfo.isConnected ? 'Online' : 'Offline'} variant={cellularInfo.isConnected ? 'success' : 'danger'} />
-            </View>
-          </Card>
+            </Card>
+          </TouchableOpacity>
         </>
       )}
 
-      {/* Location */}
       {lastScan?.location && (
         <>
           <Text style={s.sectionTitle}>Location</Text>
@@ -309,15 +331,6 @@ export default function ScanScreen() {
           </Card>
         </>
       )}
-
-      {/* Target + Actions */}
-      <Text style={s.sectionTitle}>Target Network</Text>
-      <Input
-        label=""
-        value={targetSsid}
-        onChangeText={setTargetSsid}
-        placeholder="Enter SSID (e.g. STUDENT)"
-      />
 
       {targetSsid && lastScan && (
         <View style={s.actions}>
@@ -354,9 +367,10 @@ const s = StyleSheet.create({
     marginBottom: 4,
   },
   networkCard: { padding: 14 },
+  networkCardSelected: { borderColor: T.green, borderWidth: 1 },
   networkRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   networkInfo: { flex: 1, marginRight: 12 },
-  networkNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
+  networkNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },
   networkSsid: { fontSize: 15, fontWeight: '600', color: T.text, flexShrink: 1 },
   networkMeta: { fontSize: 11, color: T.textMuted, fontFamily: 'monospace' },
   signalCol: { alignItems: 'flex-end', gap: 4 },
@@ -379,4 +393,9 @@ const s = StyleSheet.create({
   },
   infoTitle: { fontSize: 16, fontWeight: '600', color: T.text },
   infoDesc: { fontSize: 13, color: T.textMuted, textAlign: 'center', lineHeight: 20 },
+  targetCard: { borderColor: T.green, borderWidth: 1 },
+  targetRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  targetLabel: { fontSize: 13, color: T.textMuted },
+  targetValue: { fontSize: 14, fontWeight: '600', color: T.green, flex: 1 },
+  clearBtn: { padding: 4 },
 });
