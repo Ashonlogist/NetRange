@@ -177,7 +177,11 @@ export default function HomeScreen() {
     setPanelTab('settings');
   };
 
+  const [refreshing, setRefreshing] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
   const handleAutoDetectLocation = async () => {
+    setRefreshing(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
@@ -188,6 +192,8 @@ export default function HomeScreen() {
       setCurrentLocation(loc.coords);
     } catch (e: any) {
       setError(e.message || 'Location failed');
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -223,6 +229,7 @@ export default function HomeScreen() {
 
   const handleGenerateCoverage = async () => {
     if (!targetSsid) return Alert.alert('No Target', 'Tap a network first');
+    setGenerating(true);
     try {
       const url = `${apiUrl}/api/coverage?ssid=${encodeURIComponent(targetSsid)}&step=${interpolationStep}&power=${interpolationPower}&radius=${interpolationRadius}`;
       const resp = await fetch(url);
@@ -247,6 +254,8 @@ export default function HomeScreen() {
       Alert.alert('Map Loaded', `${data.grid.length} points rendered`);
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load coverage');
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -356,7 +365,7 @@ export default function HomeScreen() {
               )}
 
               {currentLocation && (
-                <Button title="Refresh Location" onPress={handleAutoDetectLocation} variant="secondary" icon="📍" />
+                <Button title={refreshing ? 'Locating...' : 'Refresh Location'} onPress={handleAutoDetectLocation} disabled={refreshing} loading={refreshing} variant="secondary" icon="📍" />
               )}
 
               {wifiNetworks.length > 0 && (
@@ -420,7 +429,7 @@ export default function HomeScreen() {
               {targetSsid && (
                 <View style={s.actions}>
                   <Button title={saving ? 'Saving...' : 'Save'} onPress={handleSaveScan} disabled={saving} loading={saving} variant="secondary" style={{ flex: 1 }} />
-                  <Button title="Generate Map" onPress={handleGenerateCoverage} icon="🗺️" style={{ flex: 1 }} />
+                  <Button title={generating ? 'Loading...' : 'Generate Map'} onPress={handleGenerateCoverage} disabled={generating} loading={generating} icon="🗺️" style={{ flex: 1 }} />
                 </View>
               )}
             </>

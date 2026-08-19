@@ -101,7 +101,9 @@ def api_scan_post():
             continue
         seen_bssids.add(bssid)
         signal_dbm = to_dbm(n.get("strength"))
-        signal_pct = max(0, min(100, round((signal_dbm + 100) * 2))) if signal_dbm is not None else None
+        if signal_dbm is None:
+            signal_dbm = -70.0
+        signal_pct = max(0, min(100, round((signal_dbm + 100) * 2)))
         records.append({
             "ssid": ssid,
             "bssid": bssid,
@@ -121,6 +123,8 @@ def api_scan_post():
     if cellular and isinstance(cellular, dict):
         signal_strength = cellular.get("signalStrength")
         cell_dbm = to_dbm(signal_strength)
+        if cell_dbm is None:
+            cell_dbm = -70.0
         records.append({
             "ssid": (cellular.get("carrier") or "Cellular").strip(),
             "bssid": "",

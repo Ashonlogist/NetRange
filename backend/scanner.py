@@ -104,7 +104,7 @@ def idw_interpolate(scans, ssid_filter=None, grid_step=0.0001, power=2, max_radi
         if s.get("lat") is not None and s.get("lon") is not None and s.get("signal_dbm") is not None
     ]
 
-    if len(points_with_signal) < 3:
+    if len(points_with_signal) < 1:
         return []
 
     lats = [s["lat"] for s in points_with_signal]
