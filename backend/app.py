@@ -1,14 +1,12 @@
 import os
-import json
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_cors import CORS
-from scanner import scan, save_scan, load_scans, get_current_connection, idw_interpolate, generate_contours
+from scanner import scan, get_current_connection
+from db import save_scan, load_scans
+from algorithm import delaunay_interpolate, generate_contours, mesh_geojson
 
 app = Flask(__name__)
 CORS(app)
-
-DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
-SCANS_FILE = os.path.join(DATA_DIR, "scans.json")
 
 APP_VERSION = "1.0.6"
 APK_URL = "https://netrange.ashonlogist.website/download/netrange.apk"
@@ -54,8 +52,8 @@ def api_scan():
         n["lon"] = lon
     if ssid_filter:
         networks = [n for n in networks if n.get("ssid", "").lower() == ssid_filter]
-    count = save_scan(networks, SCANS_FILE)
-    total = len(load_scans(SCANS_FILE))
+    count = save_scan(networks)
+    total = len(load_scans())
     return jsonify({
         "count": count,
         "totalScans": total,
@@ -141,8 +139,8 @@ def api_scan_post():
             "timestamp": timestamp,
         })
 
-    count = save_scan(records, SCANS_FILE) if records else 0
-    total = len(load_scans(SCANS_FILE))
+    count = save_scan(records) if records else 0
+    total = len(load_scans())
     msg = None
     if count == 0 and target:
         msg = f"No scan data for SSID '{target}'. Make sure the phone sees that network."
@@ -151,13 +149,13 @@ def api_scan_post():
 
 @app.route("/api/scans", methods=["GET"])
 def api_scans():
-    scans = load_scans(SCANS_FILE)
+    scans = load_scans()
     return jsonify({"total": len(scans), "scans": scans})
 
 
 @app.route("/api/heatmap", methods=["GET"])
 def api_heatmap():
-    scans = load_scans(SCANS_FILE)
+    scans = load_scans()
     ssid_filter = request.args.get("ssid", "").strip().lower()
     points = []
     for s in scans:
@@ -178,7 +176,7 @@ def api_heatmap():
 @app.route("/api/current", methods=["GET"])
 def api_current():
     conn = get_current_connection()
-    scans = load_scans(SCANS_FILE)
+    scans = load_scans()
     ssid = conn.get("ssid")
     points = []
     if ssid:
@@ -198,7 +196,7 @@ def api_current():
         "ssid": conn.get("ssid"),
         "device": conn.get("device"),
         "points": points,
-        "totalScans": len(load_scans(SCANS_FILE)),
+        "totalScans": len(load_scans()),
     })
 
 
@@ -214,13 +212,13 @@ def api_networks():
 
 @app.route("/api/coverage", methods=["GET"])
 def api_coverage():
-    scans = load_scans(SCANS_FILE)
+    scans = load_scans()
     ssid_filter = request.args.get("ssid", "").strip()
     grid_step = request.args.get("step", 0.00005, type=float)
     power = request.args.get("power", 2, type=float)
     max_radius = request.args.get("radius", 0.005, type=float)
 
-    grid = idw_interpolate(scans, ssid_filter or None, grid_step, power, max_radius)
+    grid = delaunay_interpolate(scans, ssid_filter or None, grid_step, power, max_radius)
 
     if not grid:
         return jsonify({"grid": [], "message": "Not enough data points for interpolation. Scan at more locations."})
@@ -242,7 +240,7 @@ def api_coverage():
 
 @app.route("/api/contours", methods=["GET"])
 def api_contours():
-    scans = load_scans(SCANS_FILE)
+    scans = load_scans()
     ssid_filter = request.args.get("ssid", "").strip()
     grid_step = request.args.get("step", 0.0001, type=float)
     power = request.args.get("power", 2, type=float)
@@ -253,8 +251,21 @@ def api_contours():
     return jsonify({"contours": contours, "count": len(contours)})
 
 
+@app.route("/api/mesh", methods=["GET"])
+def api_mesh():
+    """
+    Raw Delaunay triangle mesh: each triangle's three corner points and its
+    average signal. Not consumed by map.html yet -- for a future view that
+    draws the actual node-to-node triangles instead of only the smoothed
+    heatmap/contours.
+    """
+    scans = load_scans()
+    ssid_filter = request.args.get("ssid", "").strip()
+    data = mesh_geojson(scans, ssid_filter or None)
+    return jsonify(data)
+
+
 if __name__ == "__main__":
-    os.makedirs(DATA_DIR, exist_ok=True)
     app.run(
         host=os.environ.get("HOST", "0.0.0.0"),
         port=int(os.environ.get("PORT", 5000)),
