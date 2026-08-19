@@ -1,0 +1,10 @@
+backend/static/netrange.apk
+backend/data/
+__pycache__/
+*.pyc
+venv/
+node_modules/
+.expo/
+.git/
+*.log
+.DS_Store
