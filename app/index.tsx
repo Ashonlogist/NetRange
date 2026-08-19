@@ -54,6 +54,12 @@ export default function HomeScreen() {
   const [panelTab, setPanelTab] = useState<'scan' | 'settings'>('scan');
   const slideAnim = useRef(new Animated.Value(PANEL_H)).current;
 
+  const closePanel = () => {
+    if (!panelOpen) return;
+    Animated.spring(slideAnim, { toValue: PANEL_H, useNativeDriver: true }).start();
+    setPanelOpen(false);
+  };
+
   const [scanning, setScanning] = useState(false);
   const [wifiNetworks, setWifiNetworks] = useState<WifiNetwork[]>([]);
   const [cellularInfo, setCellularInfo] = useState<CellularInfo | null>(null);
@@ -140,9 +146,18 @@ export default function HomeScreen() {
       try {
         const netInfo = await NetInfo.fetch();
         if (netInfo.type === 'cellular') {
+          let carrierName = 'Cellular';
+          try {
+            const WifiManager = require('react-native-wifi-reborn').default;
+            const simCarrier = await WifiManager.getCarrier();
+            if (simCarrier && simCarrier.trim()) carrierName = simCarrier.trim();
+          } catch {
+            const d = netInfo.details as any;
+            carrierName = d.carrier || d.mobileCarrier || d.networkName || 'Cellular';
+          }
           const d = netInfo.details as any;
           cellular = {
-            carrier: d.carrier || d.mobileCarrier || d.networkName || 'Cellular',
+            carrier: carrierName,
             signalStrength: d.strength ?? d.signalStrength ?? undefined,
             networkType: d.cellularGeneration || d.type || 'Unknown',
             isConnected: netInfo.isConnected || false,
@@ -191,15 +206,33 @@ export default function HomeScreen() {
     }
   };
 
-  const handleGenerateCoverage = () => {
+  const handleGenerateCoverage = async () => {
     if (!targetSsid) return Alert.alert('No Target', 'Tap a network first');
-    webViewRef.current?.injectJavaScript(`
-      if (typeof loadCoverage === 'function') {
-        document.getElementById('targetSsidFilter').value = '${targetSsid.replace(/'/g, "\\'")}';
-        loadCoverage();
+    try {
+      const url = `${apiUrl}/api/coverage?ssid=${encodeURIComponent(targetSsid)}&step=${interpolationStep}&power=${interpolationPower}&radius=${interpolationRadius}`;
+      const resp = await fetch(url);
+      const data = await resp.json();
+      if (!data.grid || data.grid.length === 0) {
+        Alert.alert('No Data', 'No coverage data for this network. Save scan points first.');
+        return;
       }
-      true;
-    `);
+      const points = JSON.stringify(data.grid.map((p: any) => [p.lat, p.lng, p.weight]));
+      webViewRef.current?.injectJavaScript(`
+        (function() {
+          if (typeof L !== 'undefined' && typeof map !== 'undefined') {
+            if (typeof heatmap !== 'undefined' && heatmap) map.removeLayer(heatmap);
+            var pts = ${points};
+            heatmap = L.heatLayer(pts, { radius: 35, blur: 25, maxZoom: 18, max: 1.0 }).addTo(map);
+            var bounds = L.latLngBounds(pts.map(function(p) { return [p[0], p[1]]; }));
+            map.fitBounds(bounds, { padding: [50, 50] });
+          }
+        })();
+        true;
+      `);
+      Alert.alert('Map Loaded', `${data.grid.length} points rendered`);
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load coverage');
+    }
   };
 
   const saveSettings = async () => {
@@ -228,6 +261,10 @@ export default function HomeScreen() {
         domStorageEnabled
       />
 
+      {panelOpen && (
+        <TouchableOpacity style={s.mapOverlay} onPress={closePanel} activeOpacity={1} />
+      )}
+
       <TouchableOpacity style={s.fab} onPress={togglePanel} activeOpacity={0.8}>
         <Ionicons name={panelOpen ? 'close' : 'menu'} size={24} color="white" />
       </TouchableOpacity>
@@ -240,9 +277,9 @@ export default function HomeScreen() {
       )}
 
       <Animated.View style={[s.panel, { transform: [{ translateY: slideAnim }] }]}>
-        <View style={s.panelHandle}>
+        <TouchableOpacity style={s.panelHandle} onPress={closePanel} activeOpacity={0.7}>
           <View style={s.panelBar} />
-        </View>
+        </TouchableOpacity>
 
         <View style={s.tabRow}>
           <TouchableOpacity
@@ -403,7 +440,11 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
     shadowRadius: 12,
-    zIndex: 100,
+    zIndex: 300,
+  },
+  mapOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 150,
   },
   targetBadge: {
     position: 'absolute',
