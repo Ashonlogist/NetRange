@@ -845,8 +845,14 @@
             document.addEventListener('DOMContentLoaded', function() {
                 var banner = document.getElementById('noDataBanner');
                 var dlBtn = document.querySelector('.btn-download');
+                var sidebar = document.getElementById('sidebar');
+                var menuBtn = document.getElementById('menuBtn');
+                var overlay = document.getElementById('sidebarOverlay');
                 if (banner) banner.style.display = 'none';
                 if (dlBtn) dlBtn.style.display = 'none';
+                if (sidebar) sidebar.style.display = 'none';
+                if (menuBtn) menuBtn.style.display = 'none';
+                if (overlay) overlay.style.display = 'none';
             });
         }
 
