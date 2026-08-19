@@ -10,7 +10,7 @@ CORS(app)
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 SCANS_FILE = os.path.join(DATA_DIR, "scans.json")
 
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 APK_URL = "https://netrange.ashonlogist.website/download/netrange.apk"
 
 
@@ -35,9 +35,10 @@ def api_version():
         "version": APP_VERSION,
         "apkUrl": APK_URL,
         "notes": [
-            "In-app update checker with download progress",
-            "WiFi scan now works (real network scan)",
-            "Coverage map crash fixed (keyless map)",
+            "Scan: tap networks directly as target (no text input)",
+            "Cellular network detection improved",
+            "Coverage map: browser warnings hidden in-app",
+            "Settings: API URL hidden",
         ],
     })
 

@@ -16,7 +16,7 @@ export default function CoverageMap() {
     <View style={styles.container}>
       <Header
         title="Coverage Map"
-        subtitle={ssid ? `Network: ${ssid}` : 'Live map from server'}
+        subtitle={ssid || undefined}
       />
       <View style={styles.webWrap}>
         <WebView
