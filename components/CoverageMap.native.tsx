@@ -2,7 +2,7 @@ import React from 'react';
 import { View, StyleSheet, ActivityIndicator, Text } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useLocalSearchParams } from 'expo-router';
-import { Header, T } from '@/components/UI';
+import { T } from '@/components/UI';
 import { useApp } from '@/components/Providers';
 
 export default function CoverageMap() {
@@ -14,10 +14,6 @@ export default function CoverageMap() {
 
   return (
     <View style={styles.container}>
-      <Header
-        title="Coverage Map"
-        subtitle={ssid || undefined}
-      />
       <View style={styles.webWrap}>
         <WebView
           source={{ uri: url }}
