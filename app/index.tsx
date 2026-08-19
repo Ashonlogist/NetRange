@@ -72,6 +72,8 @@ export default function HomeScreen() {
   const [interpolationRadius, setInterpolationRadius] = useState('0.005');
   const [autoSync, setAutoSync] = useState(false);
 
+  const [carrierOverride, setCarrierOverride] = useState('');
+
   const webViewRef = useRef<WebView>(null);
 
   useEffect(() => {
@@ -87,16 +89,18 @@ export default function HomeScreen() {
 
   const loadSettings = async () => {
     try {
-      const [step, power, radius, sync] = await Promise.all([
+      const [step, power, radius, sync, carrier] = await Promise.all([
         SecureStore.getItemAsync('interpolationStep'),
         SecureStore.getItemAsync('interpolationPower'),
         SecureStore.getItemAsync('interpolationRadius'),
         SecureStore.getItemAsync('autoSync'),
+        SecureStore.getItemAsync('carrierName'),
       ]);
       if (step) setInterpolationStep(step);
       if (power) setInterpolationPower(power);
       if (radius) setInterpolationRadius(radius);
       if (sync) setAutoSync(sync === 'true');
+      if (carrier) setCarrierOverride(carrier);
     } catch {}
   };
 
@@ -144,20 +148,12 @@ export default function HomeScreen() {
 
       let cellular: CellularInfo | null = null;
       try {
+        const savedCarrier = await SecureStore.getItemAsync('carrierName');
         const netInfo = await NetInfo.fetch();
         if (netInfo.type === 'cellular') {
-          let carrierName = 'Cellular';
-          try {
-            const WifiManager = require('react-native-wifi-reborn').default;
-            const simCarrier = await WifiManager.getCarrier();
-            if (simCarrier && simCarrier.trim()) carrierName = simCarrier.trim();
-          } catch {
-            const d = netInfo.details as any;
-            carrierName = d.carrier || d.mobileCarrier || d.networkName || 'Cellular';
-          }
           const d = netInfo.details as any;
           cellular = {
-            carrier: carrierName,
+            carrier: savedCarrier || d.carrier || d.mobileCarrier || d.networkName || 'Cellular',
             signalStrength: d.strength ?? d.signalStrength ?? undefined,
             networkType: d.cellularGeneration || d.type || 'Unknown',
             isConnected: netInfo.isConnected || false,
@@ -175,6 +171,25 @@ export default function HomeScreen() {
   };
 
   const handleSelectNetwork = (ssid: string) => setTargetSsid(ssid);
+
+  const handleEditCarrier = () => {
+    if (!cellularInfo) return;
+    setPanelTab('settings');
+  };
+
+  const handleAutoDetectLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setError('Location permission denied.');
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      setCurrentLocation(loc.coords);
+    } catch (e: any) {
+      setError(e.message || 'Location failed');
+    }
+  };
 
   const handleSaveScan = async () => {
     if (!targetSsid) return Alert.alert('No Target', 'Tap a network first');
@@ -329,6 +344,21 @@ export default function HomeScreen() {
                 </Card>
               ) : null}
 
+              {currentLocation && (
+                <Card style={s.locCard}>
+                  <View style={s.locRow}>
+                    <Ionicons name="location" size={14} color={T.accent2} />
+                    <Text style={s.locText}>
+                      {currentLocation.latitude.toFixed(4)}, {currentLocation.longitude.toFixed(4)}
+                    </Text>
+                  </View>
+                </Card>
+              )}
+
+              {currentLocation && (
+                <Button title="Refresh Location" onPress={handleAutoDetectLocation} variant="secondary" icon="📍" />
+              )}
+
               {wifiNetworks.length > 0 && (
                 <>
                   <Text style={s.sectionTitle}>WiFi ({wifiNetworks.length})</Text>
@@ -361,7 +391,11 @@ export default function HomeScreen() {
               {cellularInfo && (
                 <>
                   <Text style={s.sectionTitle}>Cellular</Text>
-                  <TouchableOpacity onPress={() => handleSelectNetwork(cellularInfo.carrier)} activeOpacity={0.7}>
+                  <TouchableOpacity
+                    onPress={() => handleSelectNetwork(cellularInfo.carrier)}
+                    onLongPress={handleEditCarrier}
+                    activeOpacity={0.7}
+                  >
                     <Card style={[s.networkCard, targetSsid === cellularInfo.carrier && s.networkCardSelected]}>
                       <View style={s.networkRow}>
                         <View style={s.networkInfo}>
@@ -369,6 +403,7 @@ export default function HomeScreen() {
                             {targetSsid === cellularInfo.carrier && <Ionicons name="checkmark-circle" size={12} color={T.green} />}
                             <Text style={[s.networkSsid, targetSsid === cellularInfo.carrier && { color: T.green }]}>{cellularInfo.carrier}</Text>
                             {cellularInfo.isConnected && <Badge label="Connected" variant="success" />}
+                            <Ionicons name="pencil" size={10} color={T.textMuted} style={{ marginLeft: 4 }} />
                           </View>
                           <Text style={s.networkMeta}>{cellularInfo.networkType}</Text>
                         </View>
@@ -376,6 +411,9 @@ export default function HomeScreen() {
                       </View>
                     </Card>
                   </TouchableOpacity>
+                  <Text style={{ fontSize: 10, color: T.textMuted, textAlign: 'center', marginTop: 2 }}>
+                    Long press to rename carrier
+                  </Text>
                 </>
               )}
 
@@ -388,6 +426,24 @@ export default function HomeScreen() {
             </>
           ) : (
             <>
+              <Text style={s.sectionTitle}>Carrier Override</Text>
+              <Input
+                label="Carrier Name"
+                value={carrierOverride}
+                onChangeText={setCarrierOverride}
+                placeholder={cellularInfo?.carrier || 'e.g. Telecel'}
+              />
+              <Button
+                title="Save Carrier"
+                onPress={async () => {
+                  if (!carrierOverride.trim()) return;
+                  await SecureStore.setItemAsync('carrierName', carrierOverride.trim());
+                  setCellularInfo(prev => prev ? { ...prev, carrier: carrierOverride.trim() } : null);
+                  Alert.alert('Saved', `Carrier set to ${carrierOverride.trim()}`);
+                }}
+                variant="secondary"
+              />
+
               <Text style={s.sectionTitle}>Interpolation (IDW)</Text>
               <Input label="Grid Step" value={interpolationStep} onChangeText={setInterpolationStep} keyboardType="decimal-pad" placeholder="0.00005" />
               <Input label="Power" value={interpolationPower} onChangeText={setInterpolationPower} keyboardType="numeric" placeholder="2" />
@@ -524,4 +580,7 @@ const s = StyleSheet.create({
   targetRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   targetLabel: { fontSize: 12, color: T.textMuted },
   targetValue: { fontSize: 13, fontWeight: '600', color: T.green, flex: 1 },
+  locCard: { paddingVertical: 8, paddingHorizontal: 12 },
+  locRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  locText: { fontSize: 12, color: T.accent2, fontFamily: 'monospace' },
 });
