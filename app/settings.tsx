@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Switch, Platform, Alert, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Header, Card, Button, StatRow, T } from '@/components/UI';
+import { Header, Card, Button, Input, StatRow, T } from '@/components/UI';
 import { useApp } from '@/components/Providers';
 import { useUpdater } from '@/components/Updater';
 import * as SecureStore from 'expo-secure-store';
