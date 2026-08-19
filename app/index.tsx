@@ -247,37 +247,85 @@ export default function HomeScreen() {
     if (!targetSsid) return Alert.alert('No Target', 'Tap a network first');
     setGenerating(true);
     try {
-      const url = `${apiUrl}/api/contours?ssid=${encodeURIComponent(targetSsid)}&step=${interpolationStep}&power=${interpolationPower}&radius=${interpolationRadius}`;
-      const resp = await fetch(url);
-      const data = await resp.json();
-      if (!data.contours || data.contours.length === 0) {
-        Alert.alert('No Data', 'No coverage data. Save scan points first.');
+      const step = interpolationStep;
+      const pw = interpolationPower;
+      const rad = interpolationRadius;
+      const cUrl = `${apiUrl}/api/contours?ssid=${encodeURIComponent(targetSsid)}&step=${step}&power=${pw}&radius=${rad}`;
+      const cResp = await fetch(cUrl);
+      const cData = await cResp.json();
+      if (cData.contours && cData.contours.length > 0) {
+        const contoursJson = JSON.stringify(cData.contours);
+        webViewRef.current?.injectJavaScript(`
+          (function() {
+            if (typeof L === 'undefined' || typeof map === 'undefined') return;
+            if (typeof contourLayer !== 'undefined' && contourLayer) map.removeLayer(contourLayer);
+            contourLayer = L.layerGroup();
+            var contours = ${contoursJson};
+            var allPts = [];
+            contours.forEach(function(c) {
+              var latlngs = c.polygon.map(function(p) { return L.latLng(p[0], p[1]); });
+              allPts = allPts.concat(latlngs);
+              L.polygon(latlngs, {
+                color: c.color,
+                fillColor: c.color,
+                fillOpacity: 0.35,
+                weight: 2,
+                opacity: 0.7,
+              }).bindPopup(c.label + ' (' + c.level + ' dBm)').addTo(contourLayer);
+            });
+            contourLayer.addTo(map);
+            if (allPts.length > 0) {
+              map.fitBounds(L.latLngBounds(allPts), { padding: [50, 50] });
+            }
+          })();
+          true;
+        `);
+        Alert.alert('Map Loaded', cData.contours.length + ' contour levels rendered');
+        setGenerating(false);
         return;
       }
-      const contoursJson = JSON.stringify(data.contours);
+      const hUrl = `${apiUrl}/api/heatmap?ssid=${encodeURIComponent(targetSsid)}`;
+      const hResp = await fetch(hUrl);
+      const hData = await hResp.json();
+      if (!hData.points || hData.points.length === 0) {
+        Alert.alert('No Data', 'No coverage data. Save scan points at different locations first.');
+        setGenerating(false);
+        return;
+      }
+      const heatJson = JSON.stringify(hData.points);
       webViewRef.current?.injectJavaScript(`
         (function() {
           if (typeof L === 'undefined' || typeof map === 'undefined') return;
           if (typeof contourLayer !== 'undefined' && contourLayer) map.removeLayer(contourLayer);
           contourLayer = L.layerGroup();
-          var contours = ${contoursJson};
+          var pts = ${heatJson};
           var allPts = [];
-          contours.forEach(function(c) {
-            var latlngs = c.polygon.map(function(p) { return L.latLng(p[0], p[1]); });
-            allPts = allPts.concat(latlngs);
-            L.polygon(latlngs, {
-              color: c.color,
-              fillColor: c.color,
+          pts.forEach(function(p) {
+            var color = p.weight > 0.8 ? '#22c55e' : p.weight > 0.6 ? '#06b6d4' : p.weight > 0.4 ? '#eab308' : p.weight > 0.2 ? '#f97316' : '#ef4444';
+            L.circleMarker([p.lat, p.lng], {
+              radius: 20,
+              color: color,
+              fillColor: color,
               fillOpacity: 0.35,
-              weight: 2,
-              opacity: 0.7,
-            }).bindPopup(c.label + ' (' + c.level + ' dBm)').addTo(contourLayer);
+              weight: 1,
+              opacity: 0.6,
+            }).bindPopup((p.ssid || 'Unknown') + '<br>' + p.signal_dbm + ' dBm').addTo(contourLayer);
+            allPts.push([p.lat, p.lng]);
           });
           contourLayer.addTo(map);
           if (allPts.length > 0) {
             map.fitBounds(L.latLngBounds(allPts), { padding: [50, 50] });
           }
         })();
+        true;
+      `);
+      Alert.alert('Map Loaded', hData.points.length + ' scan points rendered');
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load coverage');
+    } finally {
+      setGenerating(false);
+    }
+  };
         true;
       `);
       Alert.alert('Map Loaded', `${data.grid.length} points rendered`);
