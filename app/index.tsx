@@ -231,22 +231,35 @@ export default function HomeScreen() {
     if (!targetSsid) return Alert.alert('No Target', 'Tap a network first');
     setGenerating(true);
     try {
-      const url = `${apiUrl}/api/coverage?ssid=${encodeURIComponent(targetSsid)}&step=${interpolationStep}&power=${interpolationPower}&radius=${interpolationRadius}`;
+      const url = `${apiUrl}/api/contours?ssid=${encodeURIComponent(targetSsid)}&step=${interpolationStep}&power=${interpolationPower}&radius=${interpolationRadius}`;
       const resp = await fetch(url);
       const data = await resp.json();
-      if (!data.grid || data.grid.length === 0) {
-        Alert.alert('No Data', 'No coverage data for this network. Save scan points first.');
+      if (!data.contours || data.contours.length === 0) {
+        Alert.alert('No Data', 'No coverage data. Save scan points first.');
         return;
       }
-      const points = JSON.stringify(data.grid.map((p: any) => [p.lat, p.lng, p.weight]));
+      const contoursJson = JSON.stringify(data.contours);
       webViewRef.current?.injectJavaScript(`
         (function() {
-          if (typeof L !== 'undefined' && typeof map !== 'undefined') {
-            if (typeof heatmap !== 'undefined' && heatmap) map.removeLayer(heatmap);
-            var pts = ${points};
-            heatmap = L.heatLayer(pts, { radius: 35, blur: 25, maxZoom: 18, max: 1.0 }).addTo(map);
-            var bounds = L.latLngBounds(pts.map(function(p) { return [p[0], p[1]]; }));
-            map.fitBounds(bounds, { padding: [50, 50] });
+          if (typeof L === 'undefined' || typeof map === 'undefined') return;
+          if (typeof contourLayer !== 'undefined' && contourLayer) map.removeLayer(contourLayer);
+          contourLayer = L.layerGroup();
+          var contours = ${contoursJson};
+          var allPts = [];
+          contours.forEach(function(c) {
+            var latlngs = c.polygon.map(function(p) { return L.latLng(p[0], p[1]); });
+            allPts = allPts.concat(latlngs);
+            L.polygon(latlngs, {
+              color: c.color,
+              fillColor: c.color,
+              fillOpacity: 0.35,
+              weight: 2,
+              opacity: 0.7,
+            }).bindPopup(c.label + ' (' + c.level + ' dBm)').addTo(contourLayer);
+          });
+          contourLayer.addTo(map);
+          if (allPts.length > 0) {
+            map.fitBounds(L.latLngBounds(allPts), { padding: [50, 50] });
           }
         })();
         true;

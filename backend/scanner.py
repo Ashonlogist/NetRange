@@ -149,6 +149,105 @@ def idw_interpolate(scans, ssid_filter=None, grid_step=0.0001, power=2, max_radi
     return grid
 
 
+def generate_contours(scans, ssid_filter=None, grid_step=0.0001, power=2, max_radius=0.01):
+    grid = idw_interpolate(scans, ssid_filter, grid_step, power, max_radius)
+    if not grid:
+        return []
+
+    grid_step_lat = grid_step
+    grid_step_lon = grid_step
+    min_lat = min(p["lat"] for p in grid)
+    min_lng = min(p["lng"] for p in grid)
+
+    n_rows = round((max(p["lat"] for p in grid) - min_lat) / grid_step) + 1
+    n_cols = round((max(p["lng"] for p in grid) - min_lng) / grid_step) + 1
+
+    matrix = [[None] * n_cols for _ in range(n_rows)]
+    for p in grid:
+        r = round((p["lat"] - min_lat) / grid_step)
+        c = round((p["lng"] - min_lng) / grid_step)
+        if 0 <= r < n_rows and 0 <= c < n_cols:
+            matrix[r][c] = p["signal_dbm"]
+
+    def interp(v1, v2, threshold):
+        if v1 is None or v2 is None:
+            return 0.5
+        if abs(v2 - v1) < 1e-12:
+            return 0.5
+        return (threshold - v1) / (v2 - v1)
+
+    levels = [
+        (-35, "Excellent", "#22c55e"),
+        (-45, "Good", "#06b6d4"),
+        (-55, "Fair", "#eab308"),
+        (-65, "Weak", "#f97316"),
+        (-75, "Poor", "#ef4444"),
+    ]
+
+    contours = []
+    for threshold, label, color in levels:
+        segments = []
+        for r in range(n_rows - 1):
+            for c in range(n_cols - 1):
+                tl = matrix[r][c]
+                tr = matrix[r][c + 1]
+                br = matrix[r + 1][c + 1]
+                bl = matrix[r + 1][c]
+
+                if any(v is None for v in [tl, tr, br, bl]):
+                    continue
+
+                case = 0
+                if tl >= threshold: case |= 8
+                if tr >= threshold: case |= 4
+                if br >= threshold: case |= 2
+                if bl >= threshold: case |= 1
+
+                if case == 0 or case == 15:
+                    continue
+
+                lat0 = min_lat + r * grid_step
+                lng0 = min_lng + c * grid_step
+
+                top = (lat0, lng0 + interp(tl, tr, threshold) * grid_step)
+                right = (lat0 + interp(tr, br, threshold) * grid_step, lng0 + grid_step)
+                bottom = (lat0 + grid_step, lng0 + interp(bl, br, threshold) * grid_step)
+                left = (lat0 + interp(tl, bl, threshold) * grid_step, lng0)
+
+                segment_lookup = {
+                    1: [bottom, left], 2: [right, bottom], 3: [right, left],
+                    4: [top, right], 5: [top, right, bottom, left],
+                    6: [top, bottom], 7: [top, left], 8: [left, top],
+                    9: [left, bottom], 10: [top, left, right, bottom],
+                    11: [top, right], 12: [right, left], 13: [right, bottom],
+                    14: [bottom, left],
+                }
+
+                if case in segment_lookup:
+                    seg = segment_lookup[case]
+                    segments.append(seg)
+
+        if segments:
+            all_pts = set()
+            for seg in segments:
+                for pt in seg:
+                    all_pts.add((round(pt[0], 6), round(pt[1], 6)))
+
+            if len(all_pts) >= 3:
+                pts = list(all_pts)
+                cx = sum(p[0] for p in pts) / len(pts)
+                cy = sum(p[1] for p in pts) / len(pts)
+                pts.sort(key=lambda p: math.atan2(p[1] - cy, p[0] - cx))
+                contours.append({
+                    "level": threshold,
+                    "label": label,
+                    "color": color,
+                    "polygon": pts,
+                })
+
+    return contours
+
+
 def get_current_connection():
     if not NMCLI:
         return {"ssid": None, "uuid": None, "device": None, "connected": False}

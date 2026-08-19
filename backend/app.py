@@ -2,7 +2,7 @@ import os
 import json
 from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_cors import CORS
-from scanner import scan, save_scan, load_scans, get_current_connection, idw_interpolate
+from scanner import scan, save_scan, load_scans, get_current_connection, idw_interpolate, generate_contours
 
 app = Flask(__name__)
 CORS(app)
@@ -238,6 +238,19 @@ def api_coverage():
             "points": len(grid),
         },
     })
+
+
+@app.route("/api/contours", methods=["GET"])
+def api_contours():
+    scans = load_scans(SCANS_FILE)
+    ssid_filter = request.args.get("ssid", "").strip()
+    grid_step = request.args.get("step", 0.0001, type=float)
+    power = request.args.get("power", 2, type=float)
+    max_radius = request.args.get("radius", 0.005, type=float)
+
+    contours = generate_contours(scans, ssid_filter or None, grid_step, power, max_radius)
+
+    return jsonify({"contours": contours, "count": len(contours)})
 
 
 if __name__ == "__main__":
