@@ -190,6 +190,22 @@ export default function HomeScreen() {
       }
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       setCurrentLocation(loc.coords);
+      webViewRef.current?.injectJavaScript(`
+        (function() {
+          if (typeof L !== 'undefined' && typeof map !== 'undefined') {
+            if (typeof locMarker !== 'undefined' && locMarker) map.removeLayer(locMarker);
+            if (typeof locCircle !== 'undefined' && locCircle) map.removeLayer(locCircle);
+            locMarker = L.circleMarker([${loc.coords.latitude}, ${loc.coords.longitude}], {
+              radius: 8, color: '#7c3aed', fillColor: '#7c3aed', fillOpacity: 0.9, weight: 3
+            }).addTo(map).bindPopup('You are here');
+            locCircle = L.circle([${loc.coords.latitude}, ${loc.coords.longitude}], {
+              radius: 50, color: 'rgba(124,58,237,0.3)', fillColor: 'rgba(124,58,237,0.1)', fillOpacity: 0.5, weight: 1
+            }).addTo(map);
+            map.setView([${loc.coords.latitude}, ${loc.coords.longitude}], 17);
+          }
+        })();
+        true;
+      `);
     } catch (e: any) {
       setError(e.message || 'Location failed');
     } finally {

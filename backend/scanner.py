@@ -223,7 +223,10 @@ def generate_contours(scans, ssid_filter=None, grid_step=0.0001, power=2, max_ra
                     14: [bottom, left],
                 }
 
-                if case in segment_lookup:
+                if case == 15:
+                    seg = [top, right, bottom, left]
+                    segments.append(seg)
+                elif case in segment_lookup:
                     seg = segment_lookup[case]
                     segments.append(seg)
 
