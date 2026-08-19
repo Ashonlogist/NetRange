@@ -11,7 +11,7 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 SCANS_FILE = os.path.join(DATA_DIR, "scans.json")
 
 APP_VERSION = "1.0.2"
-APK_URL = "https://netrange.onrender.com/download/netrange.apk"
+APK_URL = "https://netrange.ashonlogist.website/download/netrange.apk"
 
 
 @app.route("/")

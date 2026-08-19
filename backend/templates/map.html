@@ -466,10 +466,10 @@
         /* ===== MOBILE MENU BUTTON ===== */
         #menuBtn {
             display: none;
-            position: fixed;
+            position: fixed !important;
             bottom: 24px;
             right: 24px;
-            z-index: 1500;
+            z-index: 99999 !important;
             width: 52px;
             height: 52px;
             border-radius: 50%;
@@ -480,6 +480,7 @@
             cursor: pointer;
             box-shadow: 0 8px 32px var(--accent-glow);
             transition: transform 0.2s, box-shadow 0.2s;
+            pointer-events: auto !important;
         }
         #menuBtn:hover {
             transform: scale(1.05);
@@ -493,7 +494,7 @@
             inset: 0;
             background: rgba(0,0,0,0.5);
             backdrop-filter: blur(4px);
-            z-index: 99;
+            z-index: 99997;
         }
 
         /* ===== MOBILE ===== */
@@ -509,7 +510,7 @@
                 height: 100%;
                 transform: translateX(-100%);
                 transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-                z-index: 200;
+                z-index: 99998;
                 border-right: 1px solid var(--glass-border);
                 box-shadow: 20px 0 60px rgba(0,0,0,0.5);
             }
@@ -715,11 +716,11 @@
             <!-- Banner -->
             <div class="banner" id="noDataBanner">
                 <strong>Browsers can't scan WiFi.</strong>
-                <a href="https://netrange.onrender.com/download/netrange.apk" target="_blank" rel="noopener">Download the Android app</a> to collect scans — they sync here automatically. Then pick your SSID and generate the coverage map.
+                <a href="https://netrange.ashonlogist.website/download/netrange.apk" target="_blank" rel="noopener">Download the Android app</a> to collect scans — they sync here automatically. Then pick your SSID and generate the coverage map.
             </div>
 
             <!-- Download -->
-            <a class="btn btn-download" href="https://netrange.onrender.com/download/netrange.apk" target="_blank" rel="noopener">
+            <a class="btn btn-download" href="https://netrange.ashonlogist.website/download/netrange.apk" target="_blank" rel="noopener">
                 &#11015; Get the Android App
             </a>
 
