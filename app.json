@@ -39,7 +39,7 @@
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.NEARBY_WIFI_DEVICES"
       ],
-      "package": "com.ashonlogist.wifimapper"
+      "package": "com.ashonlogy.netrange"
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -56,9 +56,9 @@
         "origin": false
       },
       "eas": {
-        "projectId": "98d4900e-d3b5-4a5e-a84b-49ab53fae261"
+        "projectId": "19f21a90-6050-49ee-aa20-567251aba64a"
       }
     },
-    "owner": "ashonlogists-team"
+    "owner": "ashonlogy"
   }
 }

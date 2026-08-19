@@ -326,15 +326,6 @@ export default function HomeScreen() {
       setGenerating(false);
     }
   };
-        true;
-      `);
-      Alert.alert('Map Loaded', `${data.grid.length} points rendered`);
-    } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to load coverage');
-    } finally {
-      setGenerating(false);
-    }
-  };
 
   const saveSettings = async () => {
     try {
