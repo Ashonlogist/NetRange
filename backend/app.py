@@ -1,6 +1,6 @@
 import os
 import json
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory
 from flask_cors import CORS
 from scanner import scan, save_scan, load_scans, get_current_connection, idw_interpolate
 
@@ -11,7 +11,7 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 SCANS_FILE = os.path.join(DATA_DIR, "scans.json")
 
 APP_VERSION = "1.0.2"
-APK_URL = "https://github.com/Ashonlogist/NetRange/releases/latest/download/netrange.apk"
+APK_URL = "https://netrange.onrender.com/download/netrange.apk"
 
 
 @app.route("/")
@@ -22,6 +22,11 @@ def index():
 @app.route("/map")
 def map_view():
     return render_template("map.html")
+
+
+@app.route("/download/<filename>")
+def download_file(filename):
+    return send_from_directory(os.path.join(os.path.dirname(__file__), "static"), filename, as_attachment=True)
 
 
 @app.route("/api/version")
