@@ -140,6 +140,15 @@
             attribution: '&copy; CartoDB', maxZoom: 19, pane: 'overlayPane'
         });
         L.control.layers(baseLayers, { 'Labels': labelsLayer }).addTo(map);
+
+        // Auto-enable labels on satellite/terrain, disable on streets/dark
+        map.on('baselayerchange', function(e) {
+            if (e.name === 'Satellite' || e.name === 'Terrain') {
+                if (!map.hasLayer(labelsLayer)) labelsLayer.addTo(map);
+            } else {
+                if (map.hasLayer(labelsLayer)) map.removeLayer(labelsLayer);
+            }
+        });
         cellLayer = L.layerGroup().addTo(map);
     }
 
