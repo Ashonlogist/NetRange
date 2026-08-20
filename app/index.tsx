@@ -81,6 +81,130 @@ export default function HomeScreen() {
     if (Platform.OS !== 'web') loadNetworks();
   }, []);
 
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    let mounted = true;
+    const startTracking = async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted' || !mounted) return;
+      const sub = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, distanceInterval: 10, timeInterval: 15000 },
+        (loc) => {
+          if (!mounted) return;
+          setCurrentLocation(loc.coords);
+          webViewRef.current?.injectJavaScript(`
+            (function() {
+              if (typeof L !== 'undefined' && typeof map === 'undefined') return;
+              if (typeof locMarker !== 'undefined' && locMarker) map.removeLayer(locMarker);
+              if (typeof locCircle !== 'undefined' && locCircle) map.removeLayer(locCircle);
+              locMarker = L.circleMarker([${loc.coords.latitude}, ${loc.coords.longitude}], {
+                radius: 8, color: '#7c3aed', fillColor: '#7c3aed', fillOpacity: 0.9, weight: 3
+              }).addTo(map).bindPopup('You are here');
+              locCircle = L.circle([${loc.coords.latitude}, ${loc.coords.longitude}], {
+                radius: 50, color: 'rgba(124,58,237,0.3)', fillColor: 'rgba(124,58,237,0.1)', fillOpacity: 0.5, weight: 1
+              }).addTo(map);
+              map.setView([${loc.coords.latitude}, ${loc.coords.longitude}], map.getZoom());
+            })();
+            true;
+          `);
+        }
+      );
+    };
+    startTracking();
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const interval = setInterval(async () => {
+      if (!targetSsid) return;
+      try {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setCurrentLocation(loc.coords);
+
+        let wifi: WifiNetwork[] = [];
+        try {
+          const WifiManager = require('react-native-wifi-reborn').default;
+          const networks = await WifiManager.loadWifiList();
+          wifi = (networks || []).map((n: any) => ({
+            ssid: n.SSID || '',
+            bssid: n.BSSID || '',
+            strength: n.level ?? n.signalStrength ?? -70,
+            frequency: n.frequency,
+            channel: n.channel,
+            isConnected: n.isConnected || false,
+          }));
+        } catch {}
+
+        let cellular: CellularInfo | null = null;
+        try {
+          const savedCarrier = await SecureStore.getItemAsync('carrierName');
+          const netInfo = await NetInfo.fetch();
+          if (netInfo.type === 'cellular') {
+            const d = netInfo.details as any;
+            cellular = {
+              carrier: savedCarrier || d.carrier || d.mobileCarrier || d.networkName || 'Cellular',
+              signalStrength: d.strength ?? d.signalStrength ?? undefined,
+              networkType: d.cellularGeneration || d.type || 'Unknown',
+              isConnected: netInfo.isConnected || false,
+            };
+          }
+        } catch {}
+
+        await fetch(`${apiUrl}/api/scan`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            wifi,
+            cellular,
+            location: loc.coords,
+            targetSsid,
+            deviceId,
+            timestamp: new Date().toISOString(),
+          }),
+        });
+
+        if (targetSsid) {
+          const meshResp = await fetch(`${apiUrl}/api/mesh?ssid=${encodeURIComponent(targetSsid)}`);
+          const meshData = await meshResp.json();
+          if (meshData.triangles && meshData.triangles.length > 0) {
+            const meshJson = JSON.stringify(meshData.triangles);
+            webViewRef.current?.injectJavaScript(`
+              (function() {
+                if (typeof L === 'undefined' || typeof map === 'undefined') return;
+                if (typeof contourLayer !== 'undefined' && contourLayer) map.removeLayer(contourLayer);
+                contourLayer = L.layerGroup();
+                var triangles = ${meshJson};
+                var allPts = [];
+                triangles.forEach(function(t) {
+                  var lls = t.vertices.map(function(v) { return L.latLng(v.lat, v.lng); });
+                  lls.forEach(function(ll) { allPts.push(ll); });
+                  var dbm = t.avg_signal_dbm;
+                  var color;
+                  if (dbm >= -50) color = '#22c55e';
+                  else if (dbm >= -60) color = '#06b6d4';
+                  else if (dbm >= -70) color = '#eab308';
+                  else if (dbm >= -80) color = '#f97316';
+                  else color = '#ef4444';
+                  L.polygon(lls, {
+                    color: color, fillColor: color,
+                    fillOpacity: 0.45, weight: 1, opacity: 0.8,
+                  }).bindPopup(dbm.toFixed(1) + ' dBm').addTo(contourLayer);
+                });
+                contourLayer.addTo(map);
+                if (allPts.length > 0) {
+                  map.fitBounds(L.latLngBounds(allPts), { padding: [50, 50] });
+                }
+              })();
+              true;
+            `);
+          }
+        }
+      } catch {}
+    }, 120000);
+    return () => clearInterval(interval);
+  }, [targetSsid, apiUrl, deviceId]);
+
   const togglePanel = () => {
     const toValue = panelOpen ? PANEL_H : 0;
     Animated.spring(slideAnim, { toValue, useNativeDriver: true }).start();
@@ -236,6 +360,7 @@ export default function HomeScreen() {
       }
       const data = await response.json();
       Alert.alert('Saved', `${data.count} points saved`);
+      handleGenerateCoverage();
     } catch (e) {
       Alert.alert('Save Failed', e instanceof Error ? e.message : 'Network error');
     } finally {

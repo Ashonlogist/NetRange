@@ -1135,47 +1135,73 @@
             setStatus('<span class="spinner"></span> Generating coverage map...');
 
             try {
-                var url = "/api/coverage?ssid=" + encodeURIComponent(filterSsid) + "&step=0.00005&power=2&radius=0.005";
+                var url = "/api/mesh?ssid=" + encodeURIComponent(filterSsid);
                 var resp = await fetch(url);
                 var data = await resp.json();
 
-                if (data.grid.length === 0) {
-                    setStatus(data.message || "No data for coverage map");
+                if (!data.triangles || data.triangles.length === 0) {
+                    setStatus(data.message || "No data for coverage map. Save scan points first.");
                     return;
                 }
 
-                var grid = data.grid;
-                var points = grid.map(function(p) { return [p.lat, p.lng, p.weight]; });
+                if (coverageLayer) { map.removeLayer(coverageLayer); }
+                coverageLayer = L.layerGroup();
+                var allPts = [];
 
-                if (heatmap) {
-                    map.removeLayer(heatmap);
-                }
-                heatmap = L.heatLayer(points, { radius: 35, blur: 25, maxZoom: 18, max: 1.0 }).addTo(map);
-
-                if (points.length > 0) {
-                    var bounds = L.latLngBounds(points.map(function(p) { return [p[0], p[1]]; }));
-                    map.fitBounds(bounds, { padding: [50, 50] });
-                }
-
-                var stats = data.stats || {};
-                var excellent = 0, good = 0, fair = 0, weak = 0;
-                grid.forEach(function(p) {
-                    if (p.signal_dbm > -50) excellent++;
-                    else if (p.signal_dbm > -60) good++;
-                    else if (p.signal_dbm > -70) fair++;
-                    else weak++;
+                data.triangles.forEach(function(t) {
+                    var lls = t.vertices.map(function(v) { return L.latLng(v.lat, v.lng); });
+                    lls.forEach(function(ll) { allPts.push(ll); });
+                    var dbm = t.avg_signal_dbm;
+                    var color;
+                    if (dbm >= -50) color = '#22c55e';
+                    else if (dbm >= -60) color = '#06b6d4';
+                    else if (dbm >= -70) color = '#eab308';
+                    else if (dbm >= -80) color = '#f97316';
+                    else color = '#ef4444';
+                    L.polygon(lls, {
+                        color: color, fillColor: color,
+                        fillOpacity: 0.45, weight: 1, opacity: 0.8,
+                    }).bindPopup(dbm.toFixed(1) + ' dBm').addTo(coverageLayer);
                 });
-                var total = grid.length;
+
+                if (data.points) {
+                    data.points.forEach(function(p) {
+                        var dbm = p.signal_dbm;
+                        var color;
+                        if (dbm >= -50) color = '#22c55e';
+                        else if (dbm >= -60) color = '#06b6d4';
+                        else if (dbm >= -70) color = '#eab308';
+                        else if (dbm >= -80) color = '#f97316';
+                        else color = '#ef4444';
+                        L.circleMarker([p.lat, p.lng], {
+                            radius: 6, color: color, fillColor: color,
+                            fillOpacity: 0.9, weight: 2,
+                        }).bindPopup((p.ssid || 'Unknown') + '<br>' + dbm + ' dBm').addTo(coverageLayer);
+                    });
+                }
+
+                coverageLayer.addTo(map);
+                if (allPts.length > 0) {
+                    map.fitBounds(L.latLngBounds(allPts), { padding: [50, 50] });
+                }
+
+                var triCount = data.triangles.length;
+                var ptCount = data.points ? data.points.length : 0;
+                var dbms = data.triangles.map(function(t) { return t.avg_signal_dbm; });
+                var avg = dbms.length ? (dbms.reduce(function(a,b){return a+b;},0)/dbms.length).toFixed(1) : 'N/A';
+                var excellent = dbms.filter(function(d){return d >= -50;}).length;
+                var good = dbms.filter(function(d){return d >= -60 && d < -50;}).length;
+                var fair = dbms.filter(function(d){return d >= -70 && d < -60;}).length;
+                var weak = dbms.filter(function(d){return d < -70;}).length;
 
                 document.getElementById("coverage-stats").innerHTML =
-                    '<div class="stat-row"><span class="stat-label">Grid points</span><span class="stat-value">' + total + '</span></div>' +
-                    '<div class="stat-row"><span class="stat-label">Min signal</span><span class="stat-value">' + stats.min + ' dBm</span></div>' +
-                    '<div class="stat-row"><span class="stat-label">Max signal</span><span class="stat-value">' + stats.max + ' dBm</span></div>' +
-                    '<div class="stat-row"><span class="stat-label">Avg signal</span><span class="stat-value">' + stats.avg + ' dBm</span></div>' +
-                    '<div class="stat-row"><span class="stat-label">Excellent</span><span class="stat-value" style="color:var(--green)">' + Math.round(excellent/total*100) + '%</span></div>' +
-                    '<div class="stat-row"><span class="stat-label">Good</span><span class="stat-value" style="color:var(--yellow)">' + Math.round(good/total*100) + '%</span></div>' +
-                    '<div class="stat-row"><span class="stat-label">Fair</span><span class="stat-value" style="color:var(--orange)">' + Math.round(fair/total*100) + '%</span></div>' +
-                    '<div class="stat-row"><span class="stat-label">Weak</span><span class="stat-value" style="color:var(--red)">' + Math.round(weak/total*100) + '%</span></div>';
+                    '<div class="stat-row"><span class="stat-label">Triangles</span><span class="stat-value">' + triCount + '</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Scan points</span><span class="stat-value">' + ptCount + '</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Avg signal</span><span class="stat-value">' + avg + ' dBm</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Excellent</span><span class="stat-value" style="color:var(--green)">' + excellent + '</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Good</span><span class="stat-value" style="color:var(--cyan)">' + good + '</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Fair</span><span class="stat-value" style="color:var(--yellow)">' + fair + '</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Weak</span><span class="stat-value" style="color:var(--red)">' + weak + '</span></div>';
 
                 document.getElementById("coverage-summary").innerHTML =
                     '<span class="coverage-badge excellent">' + excellent + ' excellent</span>' +
