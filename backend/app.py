@@ -9,6 +9,8 @@ from db import save_scan, load_scans, get_client
 from algorithm import delaunay_interpolate, generate_contours, mesh_geojson
 from analytics import (aggregate_coverage_cells, carrier_comparison,
                         daily_quality_trend, weak_zones, data_quality_summary)
+from geocoding import reverse_geocode_cells
+from api_keys import require_api_key
 
 app = Flask(__name__)
 CORS(app)
@@ -373,6 +375,7 @@ def api_analytics_product():
     weak_threshold = request.args.get("weak_threshold_dbm", -75.0, type=float)
 
     cells = aggregate_coverage_cells(scans, ssid_filter or None, cell_size_m)
+    reverse_geocode_cells(cells)
     return jsonify({
         "cells": cells,
         "carriers": carrier_comparison(scans),
@@ -394,17 +397,42 @@ def api_export():
     if aggregate:
         cells = aggregate_coverage_cells(scans, request.args.get("ssid") or None,
                                           request.args.get("cell_size_m", 150.0, type=float))
+        reverse_geocode_cells(cells)
         if fmt == "json":
             return jsonify(cells)
+        if fmt == "geojson":
+            features = []
+            for c in cells:
+                features.append({
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [c["lon"], c["lat"]]},
+                    "properties": {
+                        "signal_dbm_avg": c["signal_dbm_avg"],
+                        "signal_dbm_min": c["signal_dbm_min"],
+                        "signal_dbm_max": c["signal_dbm_max"],
+                        "speed_mbps_avg": c["speed_mbps_avg"],
+                        "sample_count": c["sample_count"],
+                        "device_count": c["device_count"],
+                        "dominant_network": c["dominant_network"],
+                        "location_name": c.get("location_name"),
+                        "confidence": c.get("confidence"),
+                        "first_seen": c["first_seen"],
+                        "last_seen": c["last_seen"],
+                    },
+                })
+            geojson = {"type": "FeatureCollection", "features": features}
+            return jsonify(geojson)
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(["lat", "lon", "signal_dbm_avg", "signal_dbm_min", "signal_dbm_max",
+        writer.writerow(["lat", "lon", "location_name", "signal_dbm_avg", "signal_dbm_min", "signal_dbm_max",
                           "speed_mbps_avg", "sample_count", "device_count", "dominant_network",
-                          "first_seen", "last_seen"])
+                          "confidence", "first_seen", "last_seen"])
         for c in cells:
-            writer.writerow([c["lat"], c["lon"], c["signal_dbm_avg"], c["signal_dbm_min"],
+            writer.writerow([c["lat"], c["lon"], c.get("location_name", ""),
+                              c["signal_dbm_avg"], c["signal_dbm_min"],
                               c["signal_dbm_max"], c["speed_mbps_avg"], c["sample_count"],
-                              c["device_count"], c["dominant_network"], c["first_seen"], c["last_seen"]])
+                              c["device_count"], c["dominant_network"], c.get("confidence"),
+                              c["first_seen"], c["last_seen"]])
         return Response(
             output.getvalue(),
             mimetype="text/csv",
@@ -435,6 +463,68 @@ def api_export():
         mimetype="text/csv",
         headers={"Content-Disposition": f"attachment; filename=netrange_export_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"},
     )
+
+
+@app.route("/api/data/coverage")
+@require_api_key
+def api_data_coverage():
+    """
+    Public, API-key-gated endpoint for aggregated coverage data.
+    Returns GeoJSON FeatureCollection with location names and confidence.
+
+    Usage: GET /api/data/coverage?key=nr_xxxxx
+    """
+    scans = load_scans()
+    ssid_filter = request.args.get("ssid", "").strip()
+    cell_size_m = request.args.get("cell_size_m", 150.0, type=float)
+    fmt = request.args.get("format", "geojson")
+
+    cells = aggregate_coverage_cells(scans, ssid_filter or None, cell_size_m)
+    reverse_geocode_cells(cells)
+
+    if fmt == "csv":
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["lat", "lon", "location_name", "signal_dbm_avg", "signal_dbm_min",
+                          "signal_dbm_max", "speed_mbps_avg", "sample_count", "device_count",
+                          "dominant_network", "confidence", "first_seen", "last_seen"])
+        for c in cells:
+            writer.writerow([c["lat"], c["lon"], c.get("location_name", ""),
+                              c["signal_dbm_avg"], c["signal_dbm_min"],
+                              c["signal_dbm_max"], c["speed_mbps_avg"], c["sample_count"],
+                              c["device_count"], c["dominant_network"], c.get("confidence"),
+                              c["first_seen"], c["last_seen"]])
+        return Response(output.getvalue(), mimetype="text/csv",
+                        headers={"Content-Disposition": f"attachment; filename=netrange_coverage_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"})
+
+    features = []
+    for c in cells:
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [c["lon"], c["lat"]]},
+            "properties": {
+                "signal_dbm_avg": c["signal_dbm_avg"],
+                "signal_dbm_min": c["signal_dbm_min"],
+                "signal_dbm_max": c["signal_dbm_max"],
+                "speed_mbps_avg": c["speed_mbps_avg"],
+                "sample_count": c["sample_count"],
+                "device_count": c["device_count"],
+                "dominant_network": c["dominant_network"],
+                "location_name": c.get("location_name"),
+                "confidence": c.get("confidence"),
+                "first_seen": c["first_seen"],
+                "last_seen": c["last_seen"],
+            },
+        })
+    return jsonify({"type": "FeatureCollection", "features": features})
+
+
+@app.route("/api/data/carriers")
+@require_api_key
+def api_data_carriers():
+    """Public, API-key-gated per-carrier comparison."""
+    scans = load_scans()
+    return jsonify({"carriers": carrier_comparison(scans)})
 
 
 if __name__ == "__main__":

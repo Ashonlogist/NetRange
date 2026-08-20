@@ -77,6 +77,7 @@ export default function HomeScreen() {
   const [sim1Carrier, setSim1Carrier] = useState('');
   const [sim2Carrier, setSim2Carrier] = useState('');
   const [activeSim, setActiveSim] = useState<'sim1' | 'sim2'>('sim1');
+  const [showDisclosure, setShowDisclosure] = useState(false);
 
   const webViewRef = useRef<WebView>(null);
 
@@ -85,6 +86,9 @@ export default function HomeScreen() {
     if (Platform.OS !== 'web') {
       loadNetworks();
       registerBackgroundScan();
+      SecureStore.getItemAsync('disclosureAccepted').then(v => {
+        if (!v) setShowDisclosure(true);
+      });
     }
   }, []);
 
@@ -527,6 +531,34 @@ export default function HomeScreen() {
 
   return (
     <View style={s.container}>
+      {showDisclosure && (
+        <View style={s.disclosureOverlay}>
+          <View style={s.disclosureCard}>
+            <Ionicons name="shield-checkmark" size={36} color={T.accent} style={{ marginBottom: 12 }} />
+            <Text style={s.disclosureTitle}>Data &amp; Privacy Notice</Text>
+            <Text style={s.disclosureBody}>
+              NetRange collects anonymized, aggregated coverage data (signal strength,
+              network name, and approximate location) to build a public coverage map.
+            </Text>
+            <Text style={s.disclosureBody}>
+              This data may be shared or sold in aggregated form to third parties such as
+              telecom providers and urban planners. Your individual location is never
+              identified — only area-level averages from 3+ contributors are published.
+            </Text>
+            <Text style={s.disclosureBody}>
+              Background scanning runs passively while you move. You can disable it in
+              Settings at any time.
+            </Text>
+            <TouchableOpacity style={s.disclosureBtn} onPress={async () => {
+              await SecureStore.setItemAsync('disclosureAccepted', 'true');
+              setShowDisclosure(false);
+            }}>
+              <Text style={s.disclosureBtnText}>I Understand</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       <WebView
         ref={webViewRef}
         source={{ uri: mapUrl }}
@@ -834,6 +866,33 @@ const s = StyleSheet.create({
   },
   adLabel: { fontSize: 8, fontWeight: '700', color: T.textMuted, letterSpacing: 1, marginBottom: 2 },
   adText: { fontSize: 12, fontWeight: '600', color: T.accent },
+  disclosureOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 200,
+  },
+  disclosureCard: {
+    width: '85%',
+    maxWidth: 360,
+    backgroundColor: 'rgba(15,20,40,0.98)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(124,58,237,0.3)',
+    padding: 24,
+    alignItems: 'center',
+  },
+  disclosureTitle: { fontSize: 17, fontWeight: '800', color: '#fff', marginBottom: 12, textAlign: 'center' },
+  disclosureBody: { fontSize: 13, fontWeight: '400', color: 'rgba(255,255,255,0.7)', lineHeight: 19, marginBottom: 10, textAlign: 'center' },
+  disclosureBtn: {
+    marginTop: 12,
+    backgroundColor: T.accent,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+  },
+  disclosureBtnText: { fontSize: 14, fontWeight: '700', color: '#fff' },
   panel: {
     position: 'absolute',
     bottom: 0,
