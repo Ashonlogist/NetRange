@@ -159,7 +159,7 @@
         });
         if (cells.length > 0) {
             var bounds = L.latLngBounds(cells.map(function(c) { return [c.lat, c.lon]; }));
-            map.fitBounds(bounds, { padding: [30, 30] });
+            map.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
         }
     }
 
@@ -233,6 +233,12 @@
 
     initMap();
     loadDashboard('');
+
+    // Auto-refresh every 60 seconds: re-fetch data, re-fit map to current cells
+    setInterval(function() {
+        var ssid = document.getElementById('networkFilter').value;
+        loadDashboard(ssid);
+    }, 60000);
     </script>
 </body>
 </html>
