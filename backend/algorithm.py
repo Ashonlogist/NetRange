@@ -15,9 +15,10 @@ Every point is weighted by two things before it feeds the mesh:
   - recency (exponential decay -- older points matter less)
   - GPS accuracy (a 50m-accuracy fix matters less than a 5m one)
 
-That combined weight only affects how much a point pulls the interpolated
-grid toward its value where multiple points fall near the same triangle
-region -- the triangulation itself is built on raw (lat, lon).
+Before triangulation, each device's raw scan trail is collapsed into a
+small number of stable "anchor" points (see compute_node_anchors) so
+GPS jitter from a stationary phone doesn't fragment into a cluster of
+spurious sliver triangles.
 
 Public functions mirror the return shapes scanner.idw_interpolate() and
 scanner.generate_contours() already produce, so app.py's /api/coverage
@@ -36,6 +37,20 @@ from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
 MIN_POINTS_FOR_MESH = 3
 DEFAULT_HALF_LIFE_SECONDS = 15 * 60  # a scan from 15 min ago counts half as much
 DEFAULT_MIN_ACCURACY_WEIGHT = 0.15   # even a bad GPS fix keeps some influence
+DEFAULT_STAY_RADIUS_M = 12.0         # floor for "same spot" -- consumer GPS is rarely
+                                      # genuinely better than this even when it claims to be,
+                                      # especially indoors where accuracy is often optimistic
+DEFAULT_ACCURACY_M = 15.0            # assumed accuracy when a scan doesn't report one
+
+
+def _haversine_meters(lat1, lon1, lat2, lon2):
+    """Great-circle distance in meters. Exact everywhere, unlike fixed-degree rounding."""
+    R = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
+    return 2 * R * math.asin(min(1.0, math.sqrt(a)))
 
 
 def _parse_timestamp(ts):
@@ -92,39 +107,114 @@ def prepare_points(scans, ssid_filter=None, now=None,
         lat, lon, sig = s.get("lat"), s.get("lon"), s.get("signal_dbm")
         if lat is None or lon is None or sig is None:
             continue
+        ts = _parse_timestamp(s.get("timestamp"))
+        acc = s.get("accuracy")
+        try:
+            acc_m = float(acc) if acc is not None else DEFAULT_ACCURACY_M
+        except (TypeError, ValueError):
+            acc_m = DEFAULT_ACCURACY_M
         w = recency_weight(s.get("timestamp"), now, half_life_seconds) * \
             accuracy_weight(s.get("accuracy"))
         points.append({
             "lat": float(lat), "lon": float(lon), "signal_dbm": float(sig),
             "weight": w, "device_id": s.get("device_id"),
             "download_speed_mbps": s.get("download_speed_mbps"),
+            "accuracy_m": acc_m, "timestamp": ts if ts is not None else now,
         })
     return points
 
 
-def _dedupe_and_blend(points):
+def compute_node_anchors(points, stay_radius_m=DEFAULT_STAY_RADIUS_M):
     """
-    Collapse points that share (near-)identical coordinates into one
-    weighted-average point. A stationary node scanning repeatedly would
-    otherwise hand the triangulator duplicate/near-duplicate coordinates,
-    which is numerically unstable for Delaunay (degenerate triangles).
-    """
-    buckets = {}
-    for p in points:
-        # ~1m grid at typical latitudes; fine enough to merge near-duplicates
-        key = (round(p["lat"], 5), round(p["lon"], 5))
-        buckets.setdefault(key, []).append(p)
+    Collapse each device's raw scan trail into a small number of stable
+    "anchor" points, instead of triangulating every raw GPS fix directly.
 
-    blended = []
-    for (lat, lon), group in buckets.items():
-        total_w = sum(g["weight"] for g in group) or 1e-9
-        signal = sum(g["signal_dbm"] * g["weight"] for g in group) / total_w
-        speeds = [g["download_speed_mbps"] for g in group if g.get("download_speed_mbps") is not None]
-        avg_speed = round(sum(speeds) / len(speeds), 2) if speeds else None
-        blended.append({"lat": lat, "lon": lon, "signal_dbm": signal,
-                         "weight": max(g["weight"] for g in group),
-                         "download_speed_mbps": avg_speed})
-    return blended
+    Consumer GPS jitters -- a phone sitting still in one room can report a
+    different lat/lon on every scan, easily 10-30m of noise indoors. Fed
+    directly into Delaunay, each jittery fix becomes its own triangle
+    vertex, producing a cluster of spurious sliver triangles for what is
+    physically one location.
+
+    Per device, points are walked in time order. A new point merges into
+    the current anchor (weighted-average position/signal, weight favoring
+    tighter GPS accuracy and more recent scans) if it falls within the
+    anchor's uncertainty radius -- max(stay_radius_m, the point's own
+    reported accuracy). Once a point falls outside that radius, the
+    device has genuinely moved: the current anchor is finalized and a new
+    one starts. This is a standard "stay point" pattern from mobility
+    trace analysis, adapted to blend signal readings instead of just
+    detecting dwell locations.
+
+    Points with no device_id (shouldn't happen from the app, but keeps
+    this robust) skip smoothing and pass through individually, since
+    there's no way to know if they came from the same phone.
+    """
+    by_device = {}
+    singles = []
+    for p in points:
+        did = p.get("device_id")
+        if not did:
+            singles.append(p)
+        else:
+            by_device.setdefault(did, []).append(p)
+
+    anchors = []
+
+    for did, pts in by_device.items():
+        pts.sort(key=lambda p: p["timestamp"])
+        anchor = None
+        for p in pts:
+            if anchor is None:
+                anchor = _new_anchor(p)
+                continue
+            dist = _haversine_meters(anchor["lat"], anchor["lon"], p["lat"], p["lon"])
+            radius = max(stay_radius_m, p["accuracy_m"], anchor["accuracy_m"])
+            if dist <= radius:
+                _merge_into_anchor(anchor, p)
+            else:
+                anchors.append(_finalize_anchor(anchor))
+                anchor = _new_anchor(p)
+        if anchor is not None:
+            anchors.append(_finalize_anchor(anchor))
+
+    for p in singles:
+        anchors.append(_finalize_anchor(_new_anchor(p)))
+
+    return anchors
+
+
+def _new_anchor(p):
+    return {
+        "lat_sum": p["lat"] * p["weight"], "lon_sum": p["lon"] * p["weight"],
+        "sig_sum": p["signal_dbm"] * p["weight"], "w_sum": p["weight"],
+        "lat": p["lat"], "lon": p["lon"],
+        "accuracy_m": p["accuracy_m"], "max_weight": p["weight"],
+        "speeds": [p["download_speed_mbps"]] if p.get("download_speed_mbps") is not None else [],
+    }
+
+
+def _merge_into_anchor(anchor, p):
+    anchor["lat_sum"] += p["lat"] * p["weight"]
+    anchor["lon_sum"] += p["lon"] * p["weight"]
+    anchor["sig_sum"] += p["signal_dbm"] * p["weight"]
+    anchor["w_sum"] += p["weight"]
+    anchor["lat"] = anchor["lat_sum"] / anchor["w_sum"]
+    anchor["lon"] = anchor["lon_sum"] / anchor["w_sum"]
+    anchor["accuracy_m"] = min(anchor["accuracy_m"], p["accuracy_m"])
+    anchor["max_weight"] = max(anchor["max_weight"], p["weight"])
+    if p.get("download_speed_mbps") is not None:
+        anchor["speeds"].append(p["download_speed_mbps"])
+
+
+def _finalize_anchor(anchor):
+    w = anchor["w_sum"] or 1e-9
+    avg_speed = round(sum(anchor["speeds"]) / len(anchor["speeds"]), 2) if anchor["speeds"] else None
+    return {
+        "lat": anchor["lat"], "lon": anchor["lon"],
+        "signal_dbm": anchor["sig_sum"] / w,
+        "weight": anchor["max_weight"],
+        "download_speed_mbps": avg_speed,
+    }
 
 
 def _idw_fallback_grid(points, grid_step, power, max_radius):
@@ -171,7 +261,7 @@ def build_mesh(scans, ssid_filter=None, now=None):
     grid and (later, if wanted) a frontend that draws the triangles directly.
     """
     points = prepare_points(scans, ssid_filter, now)
-    points = _dedupe_and_blend(points)
+    points = compute_node_anchors(points)
 
     if len(points) < MIN_POINTS_FOR_MESH:
         return None
@@ -206,7 +296,7 @@ def delaunay_interpolate(scans, ssid_filter=None, grid_step=0.00005,
     mesh = build_mesh(scans, ssid_filter, now)
     if mesh is None:
         points = prepare_points(scans, ssid_filter, now)
-        points = _dedupe_and_blend(points)
+        points = compute_node_anchors(points)
         if not points:
             return []
         return _idw_fallback_grid(points, grid_step, power, max_radius)
