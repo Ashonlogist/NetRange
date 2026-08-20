@@ -527,6 +527,164 @@ def api_data_carriers():
     return jsonify({"carriers": carrier_comparison(scans)})
 
 
+@app.route("/api/leaderboard")
+def api_leaderboard():
+    """
+    Gamification: top contributors by distinct cells scanned, plus
+    a coverage completeness score for the known scan area.
+    """
+    scans = load_scans()
+    cells = aggregate_coverage_cells(scans, cell_size_m=150.0)
+
+    # Per-device cell count (privacy: only count, no device_id in output)
+    from collections import defaultdict
+    device_cells = defaultdict(set)
+    for s in scans:
+        did = s.get("device_id")
+        lat, lon = s.get("lat"), s.get("lon")
+        if did and lat is not None and lon is not None:
+            key, _, _ = analytics._cell_id(lat, lon, 150.0)
+            device_cells[did].add(key)
+
+    ranked = sorted(
+        [{"device": did[:12] + "...", "cells_scanned": len(cell_set)}
+         for did, cell_set in device_cells.items()],
+        key=lambda x: x["cells_scanned"],
+        reverse=True,
+    )
+
+    # Coverage completeness: what % of the bounding box has data
+    if cells:
+        lats = [c["lat"] for c in cells]
+        lons = [c["lon"] for c in cells]
+        area_m2 = (max(lats) - min(lats)) * 111320 * (max(lons) - min(lons)) * 111320 * math.cos(math.radians(sum(lats) / len(lats)))
+        cell_area_m2 = 150.0 * 150.0
+        coverage_pct = round(min(100.0, (len(cells) * cell_area_m2) / max(1.0, area_m2) * 100), 1)
+    else:
+        coverage_pct = 0.0
+
+    return jsonify({
+        "top_contributors": ranked[:20],
+        "total_devices": len(device_cells),
+        "total_published_cells": len(cells),
+        "coverage_completeness_pct": coverage_pct,
+    })
+
+
+@app.route("/api/gaps")
+def api_gaps():
+    """
+    Coverage gaps: grid cells within the scan bounding box that have
+    NO published data. Shows where more scanning is needed.
+    """
+    scans = load_scans()
+    cells = aggregate_coverage_cells(scans, cell_size_m=150.0)
+
+    if not cells:
+        return jsonify({"gaps": [], "message": "No published cells yet."})
+
+    lats = [c["lat"] for c in cells]
+    lons = [c["lon"] for c in cells]
+    from analytics import _cell_id
+    min_lat, max_lat = min(lats), max(lats)
+    min_lon, max_lon = min(lons), max(lons)
+
+    # Build set of occupied cell keys
+    occupied = set()
+    for c in cells:
+        key, _, _ = _cell_id(c["lat"], c["lon"], 150.0)
+        occupied.add(key)
+
+    # Walk bounding box at 150m grid, find empty cells
+    lat_step = 150.0 / 111320.0
+    avg_lat = (min_lat + max_lat) / 2
+    lon_step = 150.0 / (111320.0 * max(0.0001, math.cos(math.radians(avg_lat))))
+    gaps = []
+    lat = min_lat
+    while lat <= max_lat:
+        lon = min_lon
+        while lon <= max_lon:
+            key, _, _ = _cell_id(lat, lon, 150.0)
+            if key not in occupied:
+                gaps.append({"lat": round(lat, 5), "lon": round(lon, 5)})
+            lon += lon_step
+        lat += lat_step
+
+    return jsonify({"gaps": gaps[:500], "total_gaps": len(gaps)})
+
+
+@app.route("/api/snapshot")
+@require_api_key
+def api_snapshot():
+    """
+    Time-windowed snapshot: returns aggregated coverage data filtered
+    to a specific date range. Buyers can request "coverage as of Q3 2026"
+    and get a fixed, citable dataset.
+
+    Usage: GET /api/snapshot?key=nr_xxx&start=2026-07-01&end=2026-09-30
+    """
+    scans = load_scans()
+    start = request.args.get("start", "")
+    end = request.args.get("end", "")
+    fmt = request.args.get("format", "geojson")
+
+    # Filter scans to date window
+    if start or end:
+        filtered = []
+        for s in scans:
+            ts = s.get("timestamp")
+            if not ts:
+                continue
+            day = str(ts)[:10]
+            if start and day < start:
+                continue
+            if end and day > end:
+                continue
+            filtered.append(s)
+        scans = filtered
+
+    cells = aggregate_coverage_cells(scans, request.args.get("ssid") or None,
+                                      request.args.get("cell_size_m", 150.0, type=float))
+    reverse_geocode_cells(cells)
+
+    meta = {
+        "snapshot_start": start or "all-time",
+        "snapshot_end": end or "all-time",
+        "total_cells": len(cells),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    if fmt == "csv":
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["lat", "lon", "location_name", "signal_dbm_avg", "speed_mbps_avg",
+                          "sample_count", "device_count", "dominant_network", "confidence"])
+        for c in cells:
+            writer.writerow([c["lat"], c["lon"], c.get("location_name", ""),
+                              c["signal_dbm_avg"], c["speed_mbps_avg"],
+                              c["sample_count"], c["device_count"], c["dominant_network"],
+                              c.get("confidence")])
+        return Response(output.getvalue(), mimetype="text/csv",
+                        headers={"Content-Disposition": f"attachment; filename=netrange_snapshot_{start or 'all'}_{end or 'now'}.csv"})
+
+    features = []
+    for c in cells:
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [c["lon"], c["lat"]]},
+            "properties": {
+                "signal_dbm_avg": c["signal_dbm_avg"],
+                "speed_mbps_avg": c["speed_mbps_avg"],
+                "sample_count": c["sample_count"],
+                "device_count": c["device_count"],
+                "dominant_network": c["dominant_network"],
+                "location_name": c.get("location_name"),
+                "confidence": c.get("confidence"),
+            },
+        })
+    return jsonify({"type": "FeatureCollection", "metadata": meta, "features": features})
+
+
 if __name__ == "__main__":
     app.run(
         host=os.environ.get("HOST", "0.0.0.0"),
