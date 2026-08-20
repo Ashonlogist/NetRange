@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "WiFi Mapper",
-    "slug": "wifi-mapper",
+    "name": "NetRange",
+    "slug": "netrange",
     "version": "1.4.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -17,8 +17,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "WiFi Mapper needs location to map signal strength",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "WiFi Mapper needs location to map signal strength"
+        "NSLocationWhenInUseUsageDescription": "NetRange needs location to map signal strength",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "NetRange needs location to map signal strength"
       }
     },
     "android": {
@@ -54,15 +54,15 @@
       "expo-task-manager",
       "react-native-wifi-reborn"
     ],
-    "scheme": "wifimapper",
+    "scheme": "netrange",
     "extra": {
       "router": {
         "origin": false
       },
       "eas": {
-        "projectId": "19f21a90-6050-49ee-aa20-567251aba64a"
+        "projectId": "b9c28203-f86b-4935-84b6-60bd76b90d49"
       }
     },
-    "owner": "ashonlogy"
+    "owner": "ass_hole"
   }
 }
