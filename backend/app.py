@@ -8,7 +8,7 @@ from algorithm import delaunay_interpolate, generate_contours, mesh_geojson
 app = Flask(__name__)
 CORS(app)
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
 APK_URL = "https://netrange.ashonlogist.website/download/netrange.apk"
 
 
@@ -76,6 +76,7 @@ def api_scan_post():
     target = (data.get("targetSsid") or "").strip()
     device_id = data.get("deviceId") or ""
     timestamp = data.get("timestamp")
+    download_speed = data.get("download_speed_mbps")
 
     def to_dbm(strength):
         if not isinstance(strength, (int, float)):
@@ -116,6 +117,7 @@ def api_scan_post():
             "device_id": device_id,
             "source": "mobile",
             "timestamp": timestamp,
+            "download_speed_mbps": download_speed,
         })
 
     if cellular and isinstance(cellular, dict):
@@ -137,6 +139,7 @@ def api_scan_post():
             "device_id": device_id,
             "source": "cellular",
             "timestamp": timestamp,
+            "download_speed_mbps": download_speed,
         })
 
     count = save_scan(records) if records else 0
@@ -263,6 +266,23 @@ def api_mesh():
     ssid_filter = request.args.get("ssid", "").strip()
     data = mesh_geojson(scans, ssid_filter or None)
     return jsonify(data)
+
+
+@app.route("/api/cleanup", methods=["POST"])
+def api_cleanup():
+    """Delete scans older than the given number of days (default 30)."""
+    days = request.json.get("days", 30) if request.is_json else 30
+    from datetime import datetime, timezone, timedelta
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    client = get_client()
+    resp = (
+        client.table("scans")
+        .delete()
+        .lt("created_at", cutoff)
+        .execute()
+    )
+    deleted = len(resp.data) if resp.data else 0
+    return jsonify({"deleted": deleted, "cutoff_days": days})
 
 
 if __name__ == "__main__":

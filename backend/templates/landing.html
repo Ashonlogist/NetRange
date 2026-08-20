@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NetRange — Campus WiFi Coverage Mapping</title>
+    <title>NetRange — Campus WiFi & Cellular Coverage Mapping</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -566,8 +566,8 @@
                 <span class="dot"></span>
                 Open-source campus coverage tool
             </div>
-            <h1>Map Your<br><span class="gradient">WiFi Coverage</span></h1>
-            <p>Scan signal strength at GPS-tagged locations on your phone, push scans to the backend, and view an interpolated coverage heatmap on an interactive map.</p>
+            <h1>Map Your<br><span class="gradient">WiFi & Cellular</span> Coverage</h1>
+            <p>Scan signal strength and download speed at GPS-tagged locations on your phone, push scans to the backend, and view a Delaunay triangulation coverage map on an interactive map.</p>
             <div class="hero-actions">
                 <a href="/map" class="hero-btn primary">
                     &#127758; Open Coverage Map
@@ -602,8 +602,8 @@
         <div class="features-grid">
             <div class="feature-card">
                 <div class="feature-icon purple">&#128225;</div>
-                <h3>WiFi Scanning</h3>
-                <p>Capture all visible networks with BSSID, signal strength, channel, and frequency at each GPS-tagged location.</p>
+                <h3>WiFi & Cellular Scanning</h3>
+                <p>Capture WiFi networks and cellular carriers (MTN, Telecel, AirtelTigo) with signal strength and download speed at each GPS-tagged location.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon cyan">&#128205;</div>
@@ -612,23 +612,23 @@
             </div>
             <div class="feature-card">
                 <div class="feature-icon green">&#127758;</div>
-                <h3>Coverage Heatmap</h3>
-                <p>IDW-interpolated coverage grid visualizes signal strength across your campus with color-coded accuracy.</p>
+                <h3>Delaunay Coverage Map</h3>
+                <p>Color-coded Delaunay triangulation shows signal strength across your area. Tap any triangle for dBm and mb/s details.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon orange">&#128241;</div>
-                <h3>Mobile + Web</h3>
-                <p>Scan on Android, view on any device. The web dashboard embeds the same interactive Leaflet map.</p>
+                <h3>Auto-Scan & Save</h3>
+                <p>The app detects your active SIM carrier, auto-saves every 2 minutes, and generates the coverage map as you walk or drive.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon red">&#128202;</div>
-                <h3>Signal Analytics</h3>
-                <p>Track excellent, good, fair, and weak coverage zones with real-time statistics and percentage breakdowns.</p>
+                <h3>Speed Measurement</h3>
+                <p>Each scan includes a download speed test. See real mb/s on the map alongside signal strength.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon pink">&#128640;</div>
-                <h3>Auto-Deploy</h3>
-                <p>Backend on Render, web on Netlify, app on EAS. Push to GitHub and everything deploys automatically.</p>
+                <h3>Crowdsourced</h3>
+                <p>Multiple phones build the same shared coverage map. Friends on different carriers all contribute data.</p>
             </div>
         </div>
     </section>
@@ -636,28 +636,28 @@
     <section class="how-it-works" id="how">
         <div class="section-header">
             <h2>How It Works</h2>
-            <p>Three steps to map your campus WiFi.</p>
+            <p>Just open the app and walk. It does everything.</p>
         </div>
         <div class="steps">
             <div class="step">
                 <div class="step-num">1</div>
                 <div class="step-content">
-                    <h3>Install & Scan</h3>
-                    <p>Download the Android app, walk around your campus, and scan WiFi networks at different locations. Each scan captures signal strength and GPS coordinates.</p>
+                    <h3>Install & Open</h3>
+                    <p>Download the Android app and open it. It auto-detects your active SIM carrier (MTN, Telecel, AirtelTigo) or connected WiFi network.</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-num">2</div>
                 <div class="step-content">
-                    <h3>Sync to Server</h3>
-                    <p>Scans are automatically synced to the Flask backend via REST API. Data is stored and deduplicated by BSSID at each location.</p>
+                    <h3>Walk & Drive</h3>
+                    <p>Every 2 minutes the app auto-saves your signal strength, download speed, and GPS location. No buttons to press.</p>
                 </div>
             </div>
             <div class="step">
                 <div class="step-num">3</div>
                 <div class="step-content">
-                    <h3>Visualize Coverage</h3>
-                    <p>Open the coverage map, select your network's SSID, and generate an interpolated heatmap showing signal strength across your campus.</p>
+                    <h3>See the Map</h3>
+                    <p>The coverage map auto-generates as Delaunay triangles. Open the browser map to switch between carriers and see everyone's data combined.</p>
                 </div>
             </div>
         </div>
@@ -666,12 +666,12 @@
     <section class="stats-section">
         <div class="stats-bar">
             <div class="stat-item">
-                <div class="stat-number">IDW</div>
-                <div class="stat-label">Interpolation Algorithm</div>
+                <div class="stat-number">mb/s</div>
+                <div class="stat-label">Download Speed Per Scan</div>
             </div>
             <div class="stat-item">
-                <div class="stat-number">&lt;1s</div>
-                <div class="stat-label">Scan-to-Server Sync</div>
+                <div class="stat-number">2 min</div>
+                <div class="stat-label">Auto-Save Interval</div>
             </div>
             <div class="stat-item">
                 <div class="stat-number">100%</div>
@@ -682,8 +682,8 @@
 
     <section class="cta-section">
         <div class="cta-card">
-            <h2>Ready to Map Your Campus?</h2>
-            <p>Start scanning WiFi coverage today. The app is free and open-source.</p>
+            <h2>Ready to Map Coverage?</h2>
+            <p>Install the app, walk around, and watch the coverage map build itself.</p>
             <div class="hero-actions">
                 <a href="/map" class="hero-btn primary">
                     &#127758; Open Coverage Map
@@ -696,7 +696,7 @@
     </section>
 
     <footer>
-        <p>NetRange &mdash; Campus WiFi Coverage Mapping &mdash; <a href="https://github.com/Ashonlogist/NetRange" target="_blank" rel="noopener">GitHub</a> &mdash; <a href="/map">Map</a></p>
+        <p>NetRange &mdash; WiFi & Cellular Coverage Mapping &mdash; <a href="https://github.com/Ashonlogist/NetRange" target="_blank" rel="noopener">GitHub</a> &mdash; <a href="/map">Map</a></p>
     </footer>
 </body>
 </html>

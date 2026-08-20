@@ -97,6 +97,7 @@ def prepare_points(scans, ssid_filter=None, now=None,
         points.append({
             "lat": float(lat), "lon": float(lon), "signal_dbm": float(sig),
             "weight": w, "device_id": s.get("device_id"),
+            "download_speed_mbps": s.get("download_speed_mbps"),
         })
     return points
 
@@ -118,8 +119,11 @@ def _dedupe_and_blend(points):
     for (lat, lon), group in buckets.items():
         total_w = sum(g["weight"] for g in group) or 1e-9
         signal = sum(g["signal_dbm"] * g["weight"] for g in group) / total_w
+        speeds = [g["download_speed_mbps"] for g in group if g.get("download_speed_mbps") is not None]
+        avg_speed = round(sum(speeds) / len(speeds), 2) if speeds else None
         blended.append({"lat": lat, "lon": lon, "signal_dbm": signal,
-                         "weight": max(g["weight"] for g in group)})
+                         "weight": max(g["weight"] for g in group),
+                         "download_speed_mbps": avg_speed})
     return blended
 
 
@@ -175,6 +179,7 @@ def build_mesh(scans, ssid_filter=None, now=None):
     coords = np.array([[p["lon"], p["lat"]] for p in points])
     signals = np.array([p["signal_dbm"] for p in points])
     weights = np.array([p["weight"] for p in points])
+    speeds = np.array([p.get("download_speed_mbps") if p.get("download_speed_mbps") is not None else np.nan for p in points])
 
     try:
         tri = Delaunay(coords)
@@ -183,7 +188,7 @@ def build_mesh(scans, ssid_filter=None, now=None):
         return None
 
     return {"points": points, "coords": coords, "signals": signals,
-            "weights": weights, "triangulation": tri}
+            "weights": weights, "speeds": speeds, "triangulation": tri}
 
 
 def delaunay_interpolate(scans, ssid_filter=None, grid_step=0.00005,
@@ -347,14 +352,23 @@ def mesh_geojson(scans, ssid_filter=None, now=None):
         return {"triangles": [], "points": []}
 
     coords, signals, tri = mesh["coords"], mesh["signals"], mesh["triangulation"]
+    speeds = mesh.get("speeds")
     triangles = []
     for simplex in tri.simplices:
         pts = coords[simplex]
         vals = signals[simplex]
+        avg_speed = None
+        if speeds is not None:
+            tri_speeds = speeds[simplex]
+            valid = tri_speeds[~(tri_speeds != tri_speeds)]
+            if len(valid) > 0:
+                avg_speed = round(float(valid.mean()), 2)
         triangles.append({
             "vertices": [{"lat": float(p[1]), "lng": float(p[0])} for p in pts],
             "avg_signal_dbm": round(float(vals.mean()), 1),
+            "avg_download_speed_mbps": avg_speed,
         })
     points = [{"lat": float(p["lat"]), "lng": float(p["lon"]),
-               "signal_dbm": round(p["signal_dbm"], 1)} for p in mesh["points"]]
+               "signal_dbm": round(p["signal_dbm"], 1),
+               "download_speed_mbps": p.get("download_speed_mbps")} for p in mesh["points"]]
     return {"triangles": triangles, "points": points}

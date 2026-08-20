@@ -81,6 +81,7 @@ def save_scan(records):
         "device_id": r.get("device_id"),
         "source": r.get("source", "mobile"),
         "client_timestamp": _to_iso(r.get("timestamp")),
+        "download_speed_mbps": r.get("download_speed_mbps"),
     } for r in records]
 
     resp = client.table("scans").insert(rows).execute()
@@ -115,7 +116,7 @@ def load_scans(limit=5000):
             "accuracy": row.get("accuracy"),
             "device_id": row.get("device_id"),
             "source": row.get("source"),
-            # prefer the client's own scan time; fall back to server insert time
             "timestamp": row.get("client_timestamp") or row.get("created_at"),
+            "download_speed_mbps": row.get("download_speed_mbps"),
         })
     return out

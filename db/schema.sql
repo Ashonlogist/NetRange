@@ -16,7 +16,8 @@ create table if not exists scans (
     device_id       text,
     source          text default 'mobile',
     client_timestamp timestamptz,          -- when the phone took the scan
-    created_at      timestamptz not null default now()  -- when the server received it
+    created_at      timestamptz not null default now(),  -- when the server received it
+    download_speed_mbps double precision   -- measured download speed in mb/s
 );
 
 -- Coverage queries always filter by SSID and want the newest rows first.

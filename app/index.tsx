@@ -117,6 +117,21 @@ export default function HomeScreen() {
     return () => { mounted = false; };
   }, []);
 
+  const measureDownloadSpeed = async (): Promise<number | null> => {
+    try {
+      const url = 'https://speed.cloudflare.com/__down?bytes=1000000';
+      const start = Date.now();
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const elapsed = (Date.now() - start) / 1000;
+      if (elapsed < 0.05) return null;
+      const mbps = parseFloat(((blob.size * 8) / (elapsed * 1000000)).toFixed(2));
+      return mbps;
+    } catch {
+      return null;
+    }
+  };
+
   useEffect(() => {
     if (Platform.OS === 'web') return;
     const interval = setInterval(async () => {
@@ -168,6 +183,8 @@ export default function HomeScreen() {
         }
         if (!autoTarget) return;
 
+        const speed = await measureDownloadSpeed();
+
         await fetch(`${apiUrl}/api/scan`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -178,6 +195,7 @@ export default function HomeScreen() {
             targetSsid: autoTarget,
             deviceId,
             timestamp: new Date().toISOString(),
+            download_speed_mbps: speed,
           }),
         });
 
@@ -205,7 +223,7 @@ export default function HomeScreen() {
                 L.polygon(lls, {
                   color: color, fillColor: color,
                   fillOpacity: 0.45, weight: 1, opacity: 0.8,
-                }).bindPopup(dbm.toFixed(1) + ' dBm').addTo(contourLayer);
+                }).bindPopup(dbm.toFixed(1) + ' dBm' + (t.download_speed_mbps ? '<br>' + t.download_speed_mbps + ' mb/s' : '')).addTo(contourLayer);
               });
               contourLayer.addTo(map);
               if (allPts.length > 0) {
@@ -368,6 +386,7 @@ export default function HomeScreen() {
     if (!currentLocation) return Alert.alert('No Location', 'Wait for GPS');
     setSaving(true);
     try {
+      const speed = await measureDownloadSpeed();
       const response = await fetch(`${apiUrl}/api/scan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -378,6 +397,7 @@ export default function HomeScreen() {
           targetSsid,
           deviceId,
           timestamp: new Date().toISOString(),
+          download_speed_mbps: speed,
         }),
       });
       if (!response.ok) {
