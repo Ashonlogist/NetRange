@@ -99,7 +99,6 @@ export function UpdaterProvider({ children }: { children: React.ReactNode }) {
   const downloadUpdate = async () => {
     if (!updateInfo) return;
 
-    // Native-only: react-native-blob-util
     if (Platform.OS === 'web') {
       Alert.alert('Not supported', 'Download updates from the GitHub releases page.');
       return;
@@ -116,9 +115,11 @@ export function UpdaterProvider({ children }: { children: React.ReactNode }) {
         path: APK_PATH,
         overwrite: true,
         addAndroidDownloads: {
-          useDownloadManager: false,
-          notification: false,
+          useDownloadManager: true,
+          notification: true,
           title: 'NetRange update',
+          mime: 'application/vnd.android.package-archive',
+          description: 'Downloading update...',
         },
       })
         .fetch('GET', updateInfo.apkUrl)
@@ -128,7 +129,14 @@ export function UpdaterProvider({ children }: { children: React.ReactNode }) {
       setProgress(1);
       setState('ready');
       if (Platform.OS === 'android') {
-        await RnBlobUtil.android.actionViewIntent(APK_PATH, 'application/vnd.android.package-archive');
+        try {
+          await RnBlobUtil.android.actionViewIntent(APK_PATH, 'application/vnd.android.package-archive');
+        } catch {
+          Alert.alert(
+            'Update downloaded',
+            `APK saved to Downloads/netrange.apk\n\nOpen your file manager to install it.`,
+          );
+        }
       }
     } catch (e) {
       setState('error');

@@ -1,12 +1,18 @@
 import os
-from flask import Flask, render_template, request, jsonify, send_from_directory
+import csv
+import io
+from datetime import datetime, timezone, timedelta
+from flask import Flask, render_template, request, jsonify, send_from_directory, Response, session
 from flask_cors import CORS
 from scanner import scan, get_current_connection
-from db import save_scan, load_scans
+from db import save_scan, load_scans, get_client
 from algorithm import delaunay_interpolate, generate_contours, mesh_geojson
 
 app = Flask(__name__)
 CORS(app)
+app.secret_key = os.environ.get("DASHBOARD_SECRET", "netrange-analytics-2026")
+
+DASHBOARD_PASS = os.environ.get("DASHBOARD_PASSWORD", "netrange2026")
 
 APP_VERSION = "1.2.0"
 APK_URL = "https://netrange.ashonlogist.website/download/netrange.apk"
@@ -283,6 +289,86 @@ def api_cleanup():
     )
     deleted = len(resp.data) if resp.data else 0
     return jsonify({"deleted": deleted, "cutoff_days": days})
+
+
+def _check_dashboard_auth():
+    auth = request.authorization
+    if not auth or auth.password != DASHBOARD_PASS:
+        return Response("Unauthorized", 401, {"WWW-Authenticate": 'Basic realm="NetRange Dashboard"'})
+    return None
+
+
+@app.route("/dashboard")
+def dashboard():
+    auth = _check_dashboard_auth()
+    if auth:
+        return auth
+    return render_template("dashboard.html")
+
+
+@app.route("/api/analytics")
+def api_analytics():
+    auth = _check_dashboard_auth()
+    if auth:
+        return auth
+    scans = load_scans()
+    total = len(scans)
+    carriers = {}
+    speeds = []
+    locations = []
+    daily = {}
+    for s in scans:
+        ssid = s.get("ssid", "Unknown")
+        carriers[ssid] = carriers.get(ssid, 0) + 1
+        sp = s.get("download_speed_mbps")
+        if sp is not None:
+            speeds.append(sp)
+        lat, lon = s.get("lat"), s.get("lon")
+        if lat and lon:
+            locations.append({"lat": lat, "lon": lon, "signal_dbm": s.get("signal_dbm", 0), "ssid": ssid, "speed": sp})
+        ts = s.get("timestamp", "")
+        if ts:
+            day = str(ts)[:10]
+            daily[day] = daily.get(day, 0) + 1
+    avg_speed = round(sum(speeds) / len(speeds), 2) if speeds else None
+    return jsonify({
+        "total_scans": total,
+        "carriers": carriers,
+        "avg_speed_mbps": avg_speed,
+        "speed_count": len(speeds),
+        "locations": locations[:2000],
+        "daily": dict(sorted(daily.items())),
+    })
+
+
+@app.route("/api/export")
+def api_export():
+    auth = _check_dashboard_auth()
+    if auth:
+        return auth
+    scans = load_scans()
+    fmt = request.args.get("format", "csv")
+    if fmt == "json":
+        return jsonify(scans)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["ssid", "signal_dbm", "lat", "lon", "download_speed_mbps", "device_id", "source", "timestamp"])
+    for s in scans:
+        writer.writerow([
+            s.get("ssid", ""),
+            s.get("signal_dbm", ""),
+            s.get("lat", ""),
+            s.get("lon", ""),
+            s.get("download_speed_mbps", ""),
+            s.get("device_id", ""),
+            s.get("source", ""),
+            s.get("timestamp", ""),
+        ])
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=netrange_export_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"},
+    )
 
 
 if __name__ == "__main__":

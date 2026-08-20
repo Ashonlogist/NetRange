@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetRange Analytics</title>
+    <link rel="stylesheet" href="/static/vendor/leaflet.css" />
+    <script src="/static/vendor/leaflet.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #070a14;
+            --glass: rgba(12, 15, 30, 0.65);
+            --border: rgba(255,255,255,0.08);
+            --accent: #7c3aed;
+            --accent2: #06b6d4;
+            --green: #22c55e;
+            --yellow: #eab308;
+            --orange: #f97316;
+            --red: #ef4444;
+            --text: rgba(255,255,255,0.95);
+            --text2: rgba(255,255,255,0.6);
+            --textM: rgba(255,255,255,0.35);
+            --surface: rgba(255,255,255,0.05);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); }
+        .header { padding: 20px 32px; background: var(--glass); backdrop-filter: blur(24px); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+        .header h1 { font-size: 1.3em; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .header .actions { display: flex; gap: 8px; }
+        .btn { padding: 8px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-family: inherit; font-size: 0.82em; font-weight: 600; cursor: pointer; text-decoration: none; transition: all 0.2s; }
+        .btn:hover { background: rgba(255,255,255,0.08); border-color: var(--accent); }
+        .btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); border: none; color: #fff; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; padding: 24px 32px; }
+        .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+        .stat .label { font-size: 0.72em; font-weight: 500; color: var(--textM); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
+        .stat .value { font-size: 1.8em; font-weight: 800; }
+        .stat .value.gradient { background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .content { padding: 0 32px 32px; display: flex; flex-direction: column; gap: 20px; }
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+        .card h2 { font-size: 0.85em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text2); margin-bottom: 16px; }
+        #map { height: 400px; border-radius: 12px; }
+        .row { display: flex; gap: 20px; }
+        .row > * { flex: 1; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+        th { text-align: left; padding: 8px 12px; color: var(--textM); font-weight: 500; border-bottom: 1px solid var(--border); }
+        td { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.03); }
+        .bar-chart { display: flex; flex-direction: column; gap: 6px; }
+        .bar-row { display: flex; align-items: center; gap: 10px; }
+        .bar-label { width: 120px; font-size: 0.82em; color: var(--text2); text-align: right; flex-shrink: 0; }
+        .bar-track { flex: 1; height: 24px; background: rgba(255,255,255,0.03); border-radius: 6px; overflow: hidden; position: relative; }
+        .bar-fill { height: 100%; border-radius: 6px; transition: width 0.5s; display: flex; align-items: center; padding-left: 8px; font-size: 0.72em; font-weight: 600; color: #fff; min-width: 30px; }
+        @media (max-width: 768px) { .row { flex-direction: column; } .grid { grid-template-columns: 1fr 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>NetRange Analytics</h1>
+        <div class="actions">
+            <a class="btn" href="/api/export?format=csv">Export CSV</a>
+            <a class="btn" href="/api/export?format=json">Export JSON</a>
+        </div>
+    </div>
+
+    <div class="grid" id="stats"></div>
+
+    <div class="content">
+        <div class="card">
+            <h2>Coverage Map</h2>
+            <div id="map"></div>
+        </div>
+        <div class="row">
+            <div class="card">
+                <h2>Scans by Carrier</h2>
+                <div id="carrierChart" class="bar-chart"></div>
+            </div>
+            <div class="card">
+                <h2>Scans Over Time</h2>
+                <div id="dailyChart" class="bar-chart"></div>
+            </div>
+        </div>
+        <div class="card">
+            <h2>Recent Scans</h2>
+            <table>
+                <thead><tr><th>SSID</th><th>Signal</th><th>Speed</th><th>Location</th><th>Source</th></tr></thead>
+                <tbody id="scanTable"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+    (async function() {
+        var resp = await fetch('/api/analytics');
+        var d = await resp.json();
+
+        var statsHtml = '';
+        statsHtml += '<div class="stat"><div class="label">Total Scans</div><div class="value gradient">' + d.total_scans + '</div></div>';
+        statsHtml += '<div class="stat"><div class="label">Carriers</div><div class="value gradient">' + Object.keys(d.carriers).length + '</div></div>';
+        statsHtml += '<div class="stat"><div class="label">Avg Speed</div><div class="value gradient">' + (d.avg_speed_mbps || 'N/A') + ' mb/s</div></div>';
+        statsHtml += '<div class="stat"><div class="label">Speed Tests</div><div class="value gradient">' + d.speed_count + '</div></div>';
+        statsHtml += '<div class="stat"><div class="label">Locations</div><div class="value gradient">' + d.locations.length + '</div></div>';
+        document.getElementById('stats').innerHTML = statsHtml;
+
+        var map = L.map('map').setView([6.5, -3.4], 12);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; CartoDB', maxZoom: 19
+        }).addTo(map);
+
+        var colorMap = { 'MTN': '#eab308', 'Telecel': '#ef4444', 'AirtelTigo': '#06b6d4' };
+        var defaultColors = ['#7c3aed', '#22c55e', '#f97316', '#ec4899', '#8b5cf6'];
+        var colorIdx = 0;
+
+        d.locations.forEach(function(loc) {
+            var color = colorMap[loc.ssid] || defaultColors[colorIdx % defaultColors.length];
+            if (!colorMap[loc.ssid]) colorIdx++;
+            var dbm = loc.signal_dbm || -70;
+            var radius = Math.max(4, Math.min(12, (dbm + 100) / 5));
+            var popup = '<b>' + (loc.ssid || '?') + '</b><br>' + dbm + ' dBm';
+            if (loc.speed) popup += '<br>' + loc.speed + ' mb/s';
+            L.circleMarker([loc.lat, loc.lon], {
+                radius: radius, color: color, fillColor: color,
+                fillOpacity: 0.7, weight: 1
+            }).bindPopup(popup).addTo(map);
+        });
+
+        if (d.locations.length > 0) {
+            var bounds = L.latLngBounds(d.locations.map(function(l) { return [l.lat, l.lon]; }));
+            map.fitBounds(bounds, { padding: [30, 30] });
+        }
+
+        var maxCarrier = Math.max.apply(null, Object.values(d.carriers));
+        var carrierColors = { 'MTN': 'var(--yellow)', 'Telecel': 'var(--red)', 'AirtelTigo': 'var(--accent2)' };
+        var html = '';
+        Object.keys(d.carriers).sort(function(a,b) { return d.carriers[b] - d.carriers[a]; }).forEach(function(k) {
+            var pct = (d.carriers[k] / maxCarrier * 100).toFixed(0);
+            var color = carrierColors[k] || 'var(--accent)';
+            html += '<div class="bar-row"><div class="bar-label">' + k + '</div><div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + color + '">' + d.carriers[k] + '</div></div></div>';
+        });
+        document.getElementById('carrierChart').innerHTML = html;
+
+        var dailyKeys = Object.keys(d.daily).sort().slice(-14);
+        var maxDaily = Math.max.apply(null, dailyKeys.map(function(k) { return d.daily[k]; }));
+        var dhtml = '';
+        dailyKeys.forEach(function(k) {
+            var pct = (d.daily[k] / maxDaily * 100).toFixed(0);
+            dhtml += '<div class="bar-row"><div class="bar-label">' + k.slice(5) + '</div><div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:var(--accent)">' + d.daily[k] + '</div></div></div>';
+        });
+        document.getElementById('dailyChart').innerHTML = dhtml || '<div style="color:var(--textM);font-size:0.85em">No daily data</div>';
+
+        var tbody = '';
+        d.locations.slice(0, 50).forEach(function(loc) {
+            tbody += '<tr><td>' + (loc.ssid || '?') + '</td><td>' + (loc.signal_dbm || '?') + ' dBm</td><td>' + (loc.speed || '-') + ' mb/s</td><td>' + loc.lat.toFixed(4) + ', ' + loc.lon.toFixed(4) + '</td><td>mobile</td></tr>';
+        });
+        document.getElementById('scanTable').innerHTML = tbody;
+    })();
+    </script>
+</body>
+</html>
