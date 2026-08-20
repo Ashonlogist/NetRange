@@ -73,6 +73,9 @@ export default function HomeScreen() {
   const [autoSync, setAutoSync] = useState(false);
 
   const [carrierOverride, setCarrierOverride] = useState('');
+  const [sim1Carrier, setSim1Carrier] = useState('');
+  const [sim2Carrier, setSim2Carrier] = useState('');
+  const [activeSim, setActiveSim] = useState<'sim1' | 'sim2'>('sim1');
 
   const webViewRef = useRef<WebView>(null);
 
@@ -117,26 +120,26 @@ export default function HomeScreen() {
   useEffect(() => {
     if (Platform.OS === 'web') return;
     const interval = setInterval(async () => {
-      if (!targetSsid) return;
       try {
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         setCurrentLocation(loc.coords);
 
         let wifi: WifiNetwork[] = [];
+        let cellular: CellularInfo | null = null;
         try {
           const WifiManager = require('react-native-wifi-reborn').default;
           const networks = await WifiManager.loadWifiList();
+          const connectedSsid = await WifiManager.getCurrentWifiSSID().catch(() => '');
           wifi = (networks || []).map((n: any) => ({
             ssid: n.SSID || '',
             bssid: n.BSSID || '',
             strength: n.level ?? n.signalStrength ?? -70,
             frequency: n.frequency,
             channel: n.channel,
-            isConnected: n.isConnected || false,
+            isConnected: (n.SSID || '') === connectedSsid,
           }));
         } catch {}
 
-        let cellular: CellularInfo | null = null;
         try {
           const savedCarrier = await SecureStore.getItemAsync('carrierName');
           const netInfo = await NetInfo.fetch();
@@ -151,6 +154,19 @@ export default function HomeScreen() {
           }
         } catch {}
 
+        let autoTarget = targetSsid;
+        if (!autoTarget) {
+          const connectedWifi = wifi.find(n => n.isConnected);
+          if (connectedWifi) {
+            autoTarget = connectedWifi.ssid;
+            setTargetSsid(connectedWifi.ssid);
+          } else if (cellular?.isConnected) {
+            autoTarget = cellular.carrier;
+            setTargetSsid(cellular.carrier);
+          }
+        }
+        if (!autoTarget) return;
+
         await fetch(`${apiUrl}/api/scan`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -158,47 +174,45 @@ export default function HomeScreen() {
             wifi,
             cellular,
             location: loc.coords,
-            targetSsid,
+            targetSsid: autoTarget,
             deviceId,
             timestamp: new Date().toISOString(),
           }),
         });
 
-        if (targetSsid) {
-          const meshResp = await fetch(`${apiUrl}/api/mesh?ssid=${encodeURIComponent(targetSsid)}`);
-          const meshData = await meshResp.json();
-          if (meshData.triangles && meshData.triangles.length > 0) {
-            const meshJson = JSON.stringify(meshData.triangles);
-            webViewRef.current?.injectJavaScript(`
-              (function() {
-                if (typeof L === 'undefined' || typeof map === 'undefined') return;
-                if (typeof contourLayer !== 'undefined' && contourLayer) map.removeLayer(contourLayer);
-                contourLayer = L.layerGroup();
-                var triangles = ${meshJson};
-                var allPts = [];
-                triangles.forEach(function(t) {
-                  var lls = t.vertices.map(function(v) { return L.latLng(v.lat, v.lng); });
-                  lls.forEach(function(ll) { allPts.push(ll); });
-                  var dbm = t.avg_signal_dbm;
-                  var color;
-                  if (dbm >= -50) color = '#22c55e';
-                  else if (dbm >= -60) color = '#06b6d4';
-                  else if (dbm >= -70) color = '#eab308';
-                  else if (dbm >= -80) color = '#f97316';
-                  else color = '#ef4444';
-                  L.polygon(lls, {
-                    color: color, fillColor: color,
-                    fillOpacity: 0.45, weight: 1, opacity: 0.8,
-                  }).bindPopup(dbm.toFixed(1) + ' dBm').addTo(contourLayer);
-                });
-                contourLayer.addTo(map);
-                if (allPts.length > 0) {
-                  map.fitBounds(L.latLngBounds(allPts), { padding: [50, 50] });
-                }
-              })();
-              true;
-            `);
-          }
+        const meshResp = await fetch(`${apiUrl}/api/mesh?ssid=${encodeURIComponent(autoTarget)}`);
+        const meshData = await meshResp.json();
+        if (meshData.triangles && meshData.triangles.length > 0) {
+          const meshJson = JSON.stringify(meshData.triangles);
+          webViewRef.current?.injectJavaScript(`
+            (function() {
+              if (typeof L === 'undefined' || typeof map === 'undefined') return;
+              if (typeof contourLayer !== 'undefined' && contourLayer) map.removeLayer(contourLayer);
+              contourLayer = L.layerGroup();
+              var triangles = ${meshJson};
+              var allPts = [];
+              triangles.forEach(function(t) {
+                var lls = t.vertices.map(function(v) { return L.latLng(v.lat, v.lng); });
+                lls.forEach(function(ll) { allPts.push(ll); });
+                var dbm = t.avg_signal_dbm;
+                var color;
+                if (dbm >= -50) color = '#22c55e';
+                else if (dbm >= -60) color = '#06b6d4';
+                else if (dbm >= -70) color = '#eab308';
+                else if (dbm >= -80) color = '#f97316';
+                else color = '#ef4444';
+                L.polygon(lls, {
+                  color: color, fillColor: color,
+                  fillOpacity: 0.45, weight: 1, opacity: 0.8,
+                }).bindPopup(dbm.toFixed(1) + ' dBm').addTo(contourLayer);
+              });
+              contourLayer.addTo(map);
+              if (allPts.length > 0) {
+                map.fitBounds(L.latLngBounds(allPts), { padding: [50, 50] });
+              }
+            })();
+            true;
+          `);
         }
       } catch {}
     }, 120000);
@@ -213,18 +227,22 @@ export default function HomeScreen() {
 
   const loadSettings = async () => {
     try {
-      const [step, power, radius, sync, carrier] = await Promise.all([
+      const [step, power, radius, sync, carrier, s1, s2] = await Promise.all([
         SecureStore.getItemAsync('interpolationStep'),
         SecureStore.getItemAsync('interpolationPower'),
         SecureStore.getItemAsync('interpolationRadius'),
         SecureStore.getItemAsync('autoSync'),
         SecureStore.getItemAsync('carrierName'),
+        SecureStore.getItemAsync('sim1Carrier'),
+        SecureStore.getItemAsync('sim2Carrier'),
       ]);
       if (step) setInterpolationStep(step);
       if (power) setInterpolationPower(power);
       if (radius) setInterpolationRadius(radius);
       if (sync) setAutoSync(sync === 'true');
       if (carrier) setCarrierOverride(carrier);
+      if (s1) setSim1Carrier(s1);
+      if (s2) setSim2Carrier(s2);
     } catch {}
   };
 
@@ -287,6 +305,15 @@ export default function HomeScreen() {
 
       setWifiNetworks(wifi);
       setCellularInfo(cellular);
+
+      if (!targetSsid) {
+        const connectedWifi = wifi.find(n => n.isConnected);
+        if (connectedWifi) {
+          setTargetSsid(connectedWifi.ssid);
+        } else if (cellular?.isConnected) {
+          setTargetSsid(cellular.carrier);
+        }
+      }
     } catch (e: any) {
       setError(e.message || 'Scan failed');
     } finally {
@@ -650,6 +677,39 @@ export default function HomeScreen() {
                 variant="secondary"
               />
 
+              <Text style={s.sectionTitle}>SIM Carriers</Text>
+              <Card style={{ padding: 12, marginBottom: 8 }}>
+                <Text style={{ color: T.textMuted, fontSize: 11, marginBottom: 8 }}>
+                  For dual-SIM phones. Pick your carriers for each SIM slot.
+                </Text>
+                {['MTN', 'Telecel', 'AirtelTigo'].map((c) => (
+                  <TouchableOpacity
+                    key={c}
+                    style={[s.simOption, sim1Carrier === c && s.simOptionActive]}
+                    onPress={async () => {
+                      setSim1Carrier(c);
+                      await SecureStore.setItemAsync('sim1Carrier', c);
+                    }}
+                  >
+                    <Text style={[s.simLabel, sim1Carrier === c && { color: T.accent }]}>SIM1: {c}</Text>
+                    {sim1Carrier === c && <Ionicons name="checkmark-circle" size={14} color={T.accent} />}
+                  </TouchableOpacity>
+                ))}
+                {['MTN', 'Telecel', 'AirtelTigo'].map((c) => (
+                  <TouchableOpacity
+                    key={`s2-${c}`}
+                    style={[s.simOption, sim2Carrier === c && s.simOptionActive]}
+                    onPress={async () => {
+                      setSim2Carrier(c);
+                      await SecureStore.setItemAsync('sim2Carrier', c);
+                    }}
+                  >
+                    <Text style={[s.simLabel, sim2Carrier === c && { color: T.accent2 }]}>SIM2: {c}</Text>
+                    {sim2Carrier === c && <Ionicons name="checkmark-circle" size={14} color={T.accent2} />}
+                  </TouchableOpacity>
+                ))}
+              </Card>
+
               <Text style={s.sectionTitle}>Interpolation (IDW)</Text>
               <Input label="Grid Step" value={interpolationStep} onChangeText={setInterpolationStep} keyboardType="decimal-pad" placeholder="0.00005" />
               <Input label="Power" value={interpolationPower} onChangeText={setInterpolationPower} keyboardType="numeric" placeholder="2" />
@@ -789,4 +849,7 @@ const s = StyleSheet.create({
   locCard: { paddingVertical: 8, paddingHorizontal: 12 },
   locRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   locText: { fontSize: 12, color: T.accent2, fontFamily: 'monospace' },
+  simOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, marginBottom: 4, backgroundColor: 'rgba(255,255,255,0.03)' },
+  simOptionActive: { backgroundColor: 'rgba(124,58,237,0.12)', borderWidth: 1, borderColor: 'rgba(124,58,237,0.3)' },
+  simLabel: { fontSize: 13, fontWeight: '500', color: T.textMuted },
 });

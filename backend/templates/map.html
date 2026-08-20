@@ -213,6 +213,36 @@
             border-color: var(--accent);
             box-shadow: 0 0 0 3px var(--accent-glow);
         }
+        .form-group select {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            background: rgba(0,0,0,0.3);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.88em;
+            font-weight: 400;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            outline: none;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+        }
+        .form-group select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+        .form-group select option {
+            background: #1a1d2e;
+            color: var(--text-primary);
+        }
+        .form-group select optgroup {
+            color: var(--text-muted);
+            font-weight: 600;
+            font-size: 0.9em;
+        }
 
         /* ===== BUTTONS ===== */
         .btn {
@@ -751,16 +781,19 @@
             <div class="glass-card">
                 <div class="card-header">
                     <div class="card-header-icon purple">&#128225;</div>
-                    <span class="card-title">Target Network</span>
+                    <span class="card-title">Network</span>
                 </div>
                 <div class="form-group">
-                    <label>SSID</label>
-                    <input type="text" id="targetSsidFilter" placeholder="e.g. STUDENT">
+                    <label>Select Network</label>
+                    <select id="networkSelector" onchange="onNetworkChange(this.value)">
+                        <option value="">Loading networks...</option>
+                    </select>
                 </div>
-                <div class="btn-group">
-                    <button class="btn btn-secondary btn-sm" onclick="scanNetworks()">Scan Networks</button>
-                    <button class="btn btn-primary btn-sm" onclick="doScan()">Scan Here</button>
+                <div class="form-group">
+                    <label>SSID (manual override)</label>
+                    <input type="text" id="targetSsidFilter" placeholder="e.g. Telecel" oninput="document.getElementById('networkSelector').value=''">
                 </div>
+                <button class="btn btn-secondary btn-sm" onclick="loadAvailableNetworks()" style="width:100%;margin-bottom:8px">Refresh Network List</button>
                 <div id="networkList" style="display:none; margin-top:10px;"></div>
             </div>
 
@@ -1068,6 +1101,10 @@
             var lat = parseFloat(document.getElementById("lat").value);
             var lon = parseFloat(document.getElementById("lon").value);
             var filterSsid = document.getElementById("targetSsidFilter").value.trim();
+            if (!filterSsid) {
+                var selVal = document.getElementById("networkSelector").value;
+                if (selVal) filterSsid = selVal;
+            }
 
             if (isNaN(lat) || isNaN(lon)) {
                 showToast("Enter coordinates or use Auto-detect");
@@ -1132,6 +1169,10 @@
 
         async function generateCoverage() {
             var filterSsid = document.getElementById("targetSsidFilter").value.trim();
+            if (!filterSsid) {
+                var selVal = document.getElementById("networkSelector").value;
+                if (selVal) filterSsid = selVal;
+            }
             setStatus('<span class="spinner"></span> Generating coverage map...');
 
             try {
@@ -1210,7 +1251,7 @@
                     '<span class="coverage-badge weak">' + weak + ' weak</span>';
 
                 document.getElementById("coverage-stats-card").style.display = "block";
-                setStatus("Coverage generated \u2014 " + total + " points");
+                setStatus("Coverage generated \u2014 " + triCount + " triangles, " + ptCount + " points");
                 showToast("Coverage map ready");
             } catch (e) {
                 console.error('generateCoverage error:', e);
@@ -1219,9 +1260,9 @@
         }
 
         function clearCoverage() {
-            if (heatmap) {
-                map.removeLayer(heatmap);
-            }
+            if (coverageLayer) { map.removeLayer(coverageLayer); coverageLayer = null; }
+            if (contourLayer) { map.removeLayer(contourLayer); contourLayer = null; }
+            if (heatmap) { map.removeLayer(heatmap); }
             heatmap = L.heatLayer([], { radius: 30, blur: 20, maxZoom: 18, max: 1.0 }).addTo(map);
             markers.forEach(function(m) { map.removeLayer(m); });
             markers = [];
@@ -1232,6 +1273,8 @@
             document.getElementById("coverage-summary").innerHTML = "";
             document.getElementById("coverage-stats").innerHTML = "";
             document.getElementById("coverage-stats-card").style.display = "none";
+            document.getElementById("networkSelector").value = "";
+            document.getElementById("targetSsidFilter").value = "";
             setTargetInfo(null, 0, 0);
             setStatus("Cleared");
             showToast("Map cleared");
@@ -1239,6 +1282,10 @@
 
         async function loadCoverage() {
             var filterSsid = document.getElementById("targetSsidFilter").value.trim();
+            if (!filterSsid) {
+                var selVal = document.getElementById("networkSelector").value;
+                if (selVal) filterSsid = selVal;
+            }
             try {
                 var url = "/api/contours?ssid=" + encodeURIComponent(filterSsid) + "&step=0.0001&power=2&radius=0.005";
                 var resp = await fetch(url);
@@ -1308,15 +1355,64 @@
 
         function selectNetwork(ssid) {
             document.getElementById("targetSsidFilter").value = ssid;
+            document.getElementById("networkSelector").value = '';
             document.getElementById("networkList").style.display = "none";
             showToast("Target: " + ssid);
             setStatus("Target set to " + ssid);
         }
 
+        function onNetworkChange(ssid) {
+            if (ssid) {
+                document.getElementById("targetSsidFilter").value = ssid;
+                setStatus("Selected: " + ssid);
+            }
+        }
+
+        async function loadAvailableNetworks() {
+            var sel = document.getElementById("networkSelector");
+            sel.innerHTML = '<option value="">Loading...</option>';
+            try {
+                var resp = await fetch("/api/scans");
+                var data = await resp.json();
+                var ssids = {};
+                if (data.scans) {
+                    data.scans.forEach(function(s) {
+                        if (s.ssid && !ssids[s.ssid]) ssids[s.ssid] = { ssid: s.ssid, count: 0 };
+                        if (s.ssid) ssids[s.ssid].count++;
+                    });
+                }
+                var list = Object.values(ssids).sort(function(a, b) { return b.count - a.count; });
+                var html = '<option value="">-- Pick a network --</option>';
+                var carriers = ['MTN', 'Telecel', 'AirtelTigo'];
+                var carrierItems = list.filter(function(n) { return carriers.indexOf(n.ssid) >= 0; });
+                var wifiItems = list.filter(function(n) { return carriers.indexOf(n.ssid) < 0; });
+                if (carrierItems.length > 0) {
+                    html += '<optgroup label="Carriers">';
+                    carrierItems.forEach(function(n) {
+                        html += '<option value="' + n.ssid + '">' + n.ssid + ' (' + n.count + ' scans)</option>';
+                    });
+                    html += '</optgroup>';
+                }
+                if (wifiItems.length > 0) {
+                    html += '<optgroup label="WiFi Networks">';
+                    wifiItems.forEach(function(n) {
+                        html += '<option value="' + n.ssid + '">' + n.ssid + ' (' + n.count + ' scans)</option>';
+                    });
+                    html += '</optgroup>';
+                }
+                sel.innerHTML = html;
+                setStatus("Loaded " + list.length + " networks");
+            } catch (e) {
+                sel.innerHTML = '<option value="">Failed to load</option>';
+                setStatus("Could not load networks");
+            }
+        }
+
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', initMap);
+            document.addEventListener('DOMContentLoaded', function() { initMap(); loadAvailableNetworks(); });
         } else {
             initMap();
+            loadAvailableNetworks();
         }
     </script>
 </body>
