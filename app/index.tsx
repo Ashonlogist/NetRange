@@ -263,10 +263,12 @@ export default function HomeScreen() {
               var lls = t.vertices.map(function(v) { return L.latLng(v.lat, v.lng); });
               lls.forEach(function(ll) { allPts.push(ll); });
               var dbm = t.avg_signal_dbm;
-              var pct = Math.max(0, Math.min(1, (dbm + 100) / 60));
-              var r = Math.round(255 * (1 - pct));
-              var g = Math.round(200 * pct);
-              var color = 'rgb(' + r + ',' + g + ',80)';
+              var color;
+              if (dbm >= -50) color = '#22c55e';
+              else if (dbm >= -60) color = '#06b6d4';
+              else if (dbm >= -70) color = '#eab308';
+              else if (dbm >= -80) color = '#f97316';
+              else color = '#ef4444';
               L.polygon(lls, {
                 color: color,
                 fillColor: color,
