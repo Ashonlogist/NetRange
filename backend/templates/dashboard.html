@@ -110,7 +110,7 @@
     </div>
 
     <script>
-    var map, cellLayer, baseLayers, labelsLayer;
+    var map, cellLayer, meshLayer, baseLayers, labelsLayer;
 
     function signalColor(dbm) {
         if (dbm >= -50) return '#22c55e';
@@ -151,6 +151,7 @@
             }
         });
         cellLayer = L.layerGroup().addTo(map);
+        meshLayer = L.layerGroup().addTo(map);
     }
 
     function renderCells(cells) {
@@ -173,6 +174,30 @@
         }
     }
 
+    function renderMesh(ssid) {
+        meshLayer.clearLayers();
+        var qs = ssid ? '?ssid=' + encodeURIComponent(ssid) : '';
+        fetch('/api/mesh' + qs).then(function(r) { return r.json(); }).then(function(data) {
+            if (!data.triangles || data.triangles.length === 0) return;
+            var allPts = [];
+            data.triangles.forEach(function(t) {
+                var lls = t.vertices.map(function(v) { return L.latLng(v.lat, v.lng); });
+                lls.forEach(function(ll) { allPts.push(ll); });
+                var dbm = t.avg_signal_dbm;
+                var color;
+                if (dbm >= -50) color = '#22c55e';
+                else if (dbm >= -60) color = '#06b6d4';
+                else if (dbm >= -70) color = '#eab308';
+                else if (dbm >= -80) color = '#f97316';
+                else color = '#ef4444';
+                L.polygon(lls, {
+                    color: color, fillColor: color,
+                    fillOpacity: 0.5, weight: 0, opacity: 0,
+                }).bindPopup(dbm.toFixed(1) + ' dBm' + (t.avg_download_speed_mbps ? '<br>' + t.avg_download_speed_mbps + ' mb/s' : '')).addTo(meshLayer);
+            });
+        }).catch(function() {});
+    }
+
     async function loadDashboard(ssid) {
         var qs = ssid ? '?ssid=' + encodeURIComponent(ssid) : '';
         var resp = await fetch('/api/analytics');
@@ -189,6 +214,7 @@
         document.getElementById('stats').innerHTML = statsHtml;
 
         renderCells(p.cells);
+        renderMesh(ssid);
 
         var carrierHtml = '';
         p.carriers.forEach(function(c) {
@@ -244,11 +270,29 @@
     initMap();
     loadDashboard('');
 
-    // Auto-refresh every 60 seconds: re-fetch data, re-fit map to current cells
+    // Auto-refresh every 60 seconds
     setInterval(function() {
         var ssid = document.getElementById('networkFilter').value;
         loadDashboard(ssid);
     }, 60000);
+
+    // Session timeout: 30 minutes of inactivity -> force re-login
+    var SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+    var lastActivity = Date.now();
+    var sessionTimer = setTimeout(logout, SESSION_TIMEOUT_MS);
+
+    function resetTimer() {
+        lastActivity = Date.now();
+        clearTimeout(sessionTimer);
+        sessionTimer = setTimeout(logout, SESSION_TIMEOUT_MS);
+    }
+    ['mousemove','mousedown','keydown','touchstart','scroll'].forEach(function(evt) {
+        document.addEventListener(evt, resetTimer, { passive: true });
+    });
+
+    function logout() {
+        window.location.href = '/dashboard/logout';
+    }
     </script>
 </body>
 </html>

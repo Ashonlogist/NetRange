@@ -314,6 +314,15 @@ def dashboard():
     return render_template("dashboard.html")
 
 
+@app.route("/dashboard/logout")
+def dashboard_logout():
+    return Response("Session expired", 401, {
+        "WWW-Authenticate": 'Basic realm="NetRange Dashboard - Expired"',
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+    })
+
+
 @app.route("/api/analytics")
 def api_analytics():
     auth = _check_dashboard_auth()
