@@ -230,7 +230,7 @@ export default function HomeScreen() {
                 else color = '#ef4444';
                 L.polygon(lls, {
                   color: color, fillColor: color,
-                  fillOpacity: 0.45, weight: 1, opacity: 0.8,
+                  fillOpacity: 0.5, weight: 0, opacity: 0,
                 }).bindPopup(dbm.toFixed(1) + ' dBm' + (t.download_speed_mbps ? '<br>' + t.download_speed_mbps + ' mb/s' : '')).addTo(contourLayer);
               });
               contourLayer.addTo(map);
@@ -452,9 +452,9 @@ export default function HomeScreen() {
               L.polygon(lls, {
                 color: color,
                 fillColor: color,
-                fillOpacity: 0.45,
-                weight: 1,
-                opacity: 0.8,
+                fillOpacity: 0.5,
+                weight: 0,
+                opacity: 0,
               }).bindPopup(dbm.toFixed(1) + ' dBm').addTo(contourLayer);
             });
             contourLayer.addTo(map);

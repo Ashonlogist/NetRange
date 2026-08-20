@@ -1209,7 +1209,7 @@
                     else color = '#ef4444';
                     L.polygon(lls, {
                         color: color, fillColor: color,
-                        fillOpacity: 0.45, weight: 1, opacity: 0.8,
+                        fillOpacity: 0.5, weight: 0, opacity: 0,
                     }).bindPopup(dbm.toFixed(1) + ' dBm' + (t.avg_download_speed_mbps ? '<br>' + t.avg_download_speed_mbps + ' mb/s' : '')).addTo(coverageLayer);
                 });
 
@@ -1223,8 +1223,8 @@
                         else if (dbm >= -80) color = '#f97316';
                         else color = '#ef4444';
                         L.circleMarker([p.lat, p.lng], {
-                            radius: 6, color: color, fillColor: color,
-                            fillOpacity: 0.9, weight: 2,
+                            radius: 0, color: color, fillColor: color,
+                            fillOpacity: 0, weight: 0,
                         }).bindPopup((p.ssid || 'Unknown') + '<br>' + dbm + ' dBm' + (p.download_speed_mbps ? '<br>' + p.download_speed_mbps + ' mb/s' : '')).addTo(coverageLayer);
                     });
                 }
