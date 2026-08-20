@@ -347,6 +347,7 @@ export default function HomeScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [showAd, setShowAd] = useState(false);
 
   const handleAutoDetectLocation = async () => {
     setRefreshing(true);
@@ -456,6 +457,8 @@ export default function HomeScreen() {
           true;
         `);
         Alert.alert('Map Loaded', meshData.triangles.length + ' Delaunay triangles rendered');
+        setShowAd(true);
+        setTimeout(() => setShowAd(false), 8000);
         setGenerating(false);
         return;
       }
@@ -540,6 +543,13 @@ export default function HomeScreen() {
         <View style={s.targetBadge}>
           <Ionicons name="checkmark-circle" size={14} color={T.green} />
           <Text style={s.targetBadgeText} numberOfLines={1}>{targetSsid}</Text>
+        </View>
+      )}
+
+      {showAd && (
+        <View style={s.adBanner}>
+          <Text style={s.adLabel}>SPONSORED</Text>
+          <Text style={s.adText}>Coverage data powered by NetRange</Text>
         </View>
       )}
 
@@ -804,6 +814,22 @@ const s = StyleSheet.create({
     zIndex: 99,
   },
   targetBadgeText: { color: T.green, fontSize: 12, fontWeight: '600', flexShrink: 1 },
+  adBanner: {
+    position: 'absolute',
+    bottom: 100,
+    left: 24,
+    right: 24,
+    backgroundColor: 'rgba(15,20,40,0.92)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    zIndex: 98,
+  },
+  adLabel: { fontSize: 8, fontWeight: '700', color: T.textMuted, letterSpacing: 1, marginBottom: 2 },
+  adText: { fontSize: 12, fontWeight: '600', color: T.accent },
   panel: {
     position: 'absolute',
     bottom: 0,
