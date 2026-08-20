@@ -14,7 +14,7 @@ app.secret_key = os.environ.get("DASHBOARD_SECRET", "netrange-analytics-2026")
 
 DASHBOARD_PASS = os.environ.get("DASHBOARD_PASSWORD", "netrange2026")
 
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 APK_URL = "https://netrange.ashonlogist.website/download/netrange.apk"
 
 
