@@ -217,13 +217,15 @@
         });
         document.getElementById('scanTable').innerHTML = tbody;
 
-        // Populate network filter dropdown from carrier data
+        // Populate network filter dropdown from raw scan data (all networks, not just published ones)
         var sel = document.getElementById('networkFilter');
-        if (sel.options.length <= 1 && p.carriers.length > 0) {
-            p.carriers.forEach(function(c) {
+        if (sel.options.length <= 1) {
+            var nets = Object.keys(d.carriers).sort(function(a,b) { return d.carriers[b] - d.carriers[a]; });
+            nets.forEach(function(name) {
+                if (!name || name === 'Unknown') return;
                 var opt = document.createElement('option');
-                opt.value = c.network;
-                opt.textContent = c.network + ' (' + c.sample_count + ')';
+                opt.value = name;
+                opt.textContent = name + ' (' + d.carriers[name] + ')';
                 sel.appendChild(opt);
             });
         }
