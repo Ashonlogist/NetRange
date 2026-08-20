@@ -7,14 +7,23 @@ from flask_cors import CORS
 from scanner import scan, get_current_connection
 from db import save_scan, load_scans, get_client
 from algorithm import delaunay_interpolate, generate_contours, mesh_geojson
+from analytics import (aggregate_coverage_cells, carrier_comparison,
+                        daily_quality_trend, weak_zones, data_quality_summary)
 
 app = Flask(__name__)
 CORS(app)
-app.secret_key = os.environ.get("DASHBOARD_SECRET", "netrange-analytics-2026")
 
-DASHBOARD_PASS = os.environ.get("DASHBOARD_PASSWORD", "netrange2026")
+DASHBOARD_SECRET = os.environ.get("DASHBOARD_SECRET")
+DASHBOARD_PASS = os.environ.get("DASHBOARD_PASSWORD")
+if not DASHBOARD_SECRET or not DASHBOARD_PASS:
+    raise RuntimeError(
+        "DASHBOARD_SECRET and DASHBOARD_PASSWORD environment variables must be "
+        "set (Render dashboard -> Environment, or a local .env) -- no hardcoded "
+        "fallback, since /dashboard and /api/cleanup can delete data."
+    )
+app.secret_key = DASHBOARD_SECRET
 
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 APK_URL = "https://netrange.ashonlogist.website/download/netrange.apk"
 
 
@@ -277,6 +286,9 @@ def api_mesh():
 @app.route("/api/cleanup", methods=["POST"])
 def api_cleanup():
     """Delete scans older than the given number of days (default 30)."""
+    auth = _check_dashboard_auth()
+    if auth:
+        return auth
     days = request.json.get("days", 30) if request.is_json else 30
     from datetime import datetime, timezone, timedelta
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -341,6 +353,35 @@ def api_analytics():
     })
 
 
+@app.route("/api/analytics/product")
+def api_analytics_product():
+    """
+    The aggregated, privacy-safe view: area-level coverage cells, per-network
+    comparison, a daily quality trend, and a flagged weak-coverage list.
+    Every cell/network/day here is suppressed unless at least
+    analytics.MIN_DEVICES_PER_CELL distinct devices contributed to it, so
+    nothing returned here can be traced back to a single person's location.
+    This -- not /api/export's raw rows -- is the shape of data meant to
+    leave the building.
+    """
+    auth = _check_dashboard_auth()
+    if auth:
+        return auth
+    scans = load_scans()
+    ssid_filter = request.args.get("ssid", "").strip()
+    cell_size_m = request.args.get("cell_size_m", 150.0, type=float)
+    weak_threshold = request.args.get("weak_threshold_dbm", -75.0, type=float)
+
+    cells = aggregate_coverage_cells(scans, ssid_filter or None, cell_size_m)
+    return jsonify({
+        "cells": cells,
+        "carriers": carrier_comparison(scans),
+        "daily_trend": daily_quality_trend(scans),
+        "weak_zones": weak_zones(cells, weak_threshold),
+        "summary": data_quality_summary(scans, cells),
+    })
+
+
 @app.route("/api/export")
 def api_export():
     auth = _check_dashboard_auth()
@@ -348,6 +389,31 @@ def api_export():
         return auth
     scans = load_scans()
     fmt = request.args.get("format", "csv")
+    aggregate = request.args.get("aggregate", "false").lower() == "true"
+
+    if aggregate:
+        cells = aggregate_coverage_cells(scans, request.args.get("ssid") or None,
+                                          request.args.get("cell_size_m", 150.0, type=float))
+        if fmt == "json":
+            return jsonify(cells)
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["lat", "lon", "signal_dbm_avg", "signal_dbm_min", "signal_dbm_max",
+                          "speed_mbps_avg", "sample_count", "device_count", "dominant_network",
+                          "first_seen", "last_seen"])
+        for c in cells:
+            writer.writerow([c["lat"], c["lon"], c["signal_dbm_avg"], c["signal_dbm_min"],
+                              c["signal_dbm_max"], c["speed_mbps_avg"], c["sample_count"],
+                              c["device_count"], c["dominant_network"], c["first_seen"], c["last_seen"]])
+        return Response(
+            output.getvalue(),
+            mimetype="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=netrange_coverage_cells_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"},
+        )
+
+    # Raw per-scan export -- includes device_id and exact coordinates.
+    # This is an internal/debugging export, not the anonymized product --
+    # use ?aggregate=true for anything meant to leave the building.
     if fmt == "json":
         return jsonify(scans)
     output = io.StringIO()

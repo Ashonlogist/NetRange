@@ -19,6 +19,7 @@ import { Header, Card, Button, Input, Badge, StatRow, T } from '@/components/UI'
 import { useApp } from '@/components/Providers';
 import { useUpdater } from '@/components/Updater';
 import * as SecureStore from 'expo-secure-store';
+import { registerBackgroundScan } from '@/lib/backgroundTask';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const PANEL_H = SCREEN_H * 0.7;
@@ -81,7 +82,10 @@ export default function HomeScreen() {
 
   useEffect(() => {
     loadSettings();
-    if (Platform.OS !== 'web') loadNetworks();
+    if (Platform.OS !== 'web') {
+      loadNetworks();
+      registerBackgroundScan();
+    }
   }, []);
 
   useEffect(() => {
