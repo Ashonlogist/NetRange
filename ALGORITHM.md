@@ -97,10 +97,9 @@ frontend (`map.html`) keeps working without modification:
 
 ## Known limits, honestly
 
-- `data/scans.json` is still a flat JSON file rewritten on every save.
-  The algorithm change doesn't fix that — see the earlier review notes
-  on moving to SQLite (or at least a rolling per-node buffer) if scan
-  volume grows.
+- Scan data now lives in Supabase (Postgres `scans` table), not a local JSON
+  file. This means coverage is shared across all devices and survives
+  backend restarts. See `SUPABASE_SETUP.md` for setup.
 - Recency/accuracy weighting currently shapes the IDW fallback path
   directly; inside the triangulated region they influence which points
   survive `_dedupe_and_blend`, but the interior interpolation itself

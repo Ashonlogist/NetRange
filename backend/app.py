@@ -8,7 +8,7 @@ from algorithm import delaunay_interpolate, generate_contours, mesh_geojson
 app = Flask(__name__)
 CORS(app)
 
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
 APK_URL = "https://netrange.ashonlogist.website/download/netrange.apk"
 
 
