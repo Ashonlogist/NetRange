@@ -1377,8 +1377,10 @@
                 var ssids = {};
                 if (data.scans) {
                     data.scans.forEach(function(s) {
-                        if (s.ssid && !ssids[s.ssid]) ssids[s.ssid] = { ssid: s.ssid, count: 0 };
-                        if (s.ssid) ssids[s.ssid].count++;
+                        var ssid = (s.ssid || '').trim();
+                        if (!ssid || ssid.toLowerCase() === 'test') return;
+                        if (!ssids[ssid]) ssids[ssid] = { ssid: ssid, count: 0 };
+                        ssids[ssid].count++;
                     });
                 }
                 var list = Object.values(ssids).sort(function(a, b) { return b.count - a.count; });

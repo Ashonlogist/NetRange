@@ -154,16 +154,17 @@ export default function HomeScreen() {
           }
         } catch {}
 
-        let autoTarget = targetSsid;
-        if (!autoTarget) {
-          const connectedWifi = wifi.find(n => n.isConnected);
-          if (connectedWifi) {
-            autoTarget = connectedWifi.ssid;
-            setTargetSsid(connectedWifi.ssid);
-          } else if (cellular?.isConnected) {
-            autoTarget = cellular.carrier;
-            setTargetSsid(cellular.carrier);
-          }
+        let autoTarget = '';
+        const connectedWifi = wifi.find(n => n.isConnected);
+        if (connectedWifi) {
+          autoTarget = connectedWifi.ssid;
+        } else if (cellular?.isConnected) {
+          autoTarget = cellular.carrier;
+        }
+        setCellularInfo(cellular);
+        setWifiNetworks(wifi);
+        if (autoTarget && autoTarget !== targetSsid) {
+          setTargetSsid(autoTarget);
         }
         if (!autoTarget) return;
 
@@ -306,13 +307,11 @@ export default function HomeScreen() {
       setWifiNetworks(wifi);
       setCellularInfo(cellular);
 
-      if (!targetSsid) {
-        const connectedWifi = wifi.find(n => n.isConnected);
-        if (connectedWifi) {
-          setTargetSsid(connectedWifi.ssid);
-        } else if (cellular?.isConnected) {
-          setTargetSsid(cellular.carrier);
-        }
+      const connectedWifi = wifi.find(n => n.isConnected);
+      if (connectedWifi) {
+        setTargetSsid(connectedWifi.ssid);
+      } else if (cellular?.isConnected) {
+        setTargetSsid(cellular.carrier);
       }
     } catch (e: any) {
       setError(e.message || 'Scan failed');
