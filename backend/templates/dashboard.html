@@ -119,9 +119,25 @@
         document.getElementById('stats').innerHTML = statsHtml;
 
         var map = L.map('map').setView([6.5, -3.4], 12);
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; CartoDB', maxZoom: 19
-        }).addTo(map);
+        var baseLayers = {
+            'Streets': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+            }),
+            'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: '&copy; Esri', maxZoom: 19
+            }),
+            'Terrain': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenTopoMap', maxZoom: 17
+            }),
+            'Dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; CartoDB', maxZoom: 19
+            }),
+        };
+        baseLayers['Streets'].addTo(map);
+        var labelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; CartoDB', maxZoom: 19, pane: 'overlayPane'
+        });
+        L.control.layers(baseLayers, { 'Labels': labelsLayer }).addTo(map);
 
         function signalColor(dbm) {
             if (dbm >= -50) return '#22c55e';
