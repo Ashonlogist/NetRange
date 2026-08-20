@@ -67,7 +67,12 @@
 
     <div class="content">
         <div class="card">
-            <h2>Coverage Map</h2>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+                <h2 style="margin-bottom:0">Coverage Map</h2>
+                <select id="networkFilter" onchange="loadDashboard(this.value)" style="padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:0.85em">
+                    <option value="">All Networks</option>
+                </select>
+            </div>
             <div id="map"></div>
         </div>
         <div class="row">
@@ -104,22 +109,19 @@
     </div>
 
     <script>
-    (async function() {
-        var resp = await fetch('/api/analytics');
-        var d = await resp.json();
-        var presp = await fetch('/api/analytics/product');
-        var p = await presp.json();
+    var map, cellLayer, baseLayers, labelsLayer;
 
-        var statsHtml = '';
-        statsHtml += '<div class="stat"><div class="label">Total Scans</div><div class="value gradient">' + d.total_scans + '</div></div>';
-        statsHtml += '<div class="stat"><div class="label">Distinct Devices</div><div class="value gradient">' + p.summary.total_distinct_devices + '</div></div>';
-        statsHtml += '<div class="stat"><div class="label">Published Areas</div><div class="value gradient">' + p.summary.published_cells + '</div></div>';
-        statsHtml += '<div class="stat"><div class="label">Avg Speed</div><div class="value gradient">' + (d.avg_speed_mbps || 'N/A') + ' mb/s</div></div>';
-        statsHtml += '<div class="stat"><div class="label">Weak Zones</div><div class="value gradient">' + p.weak_zones.length + '</div></div>';
-        document.getElementById('stats').innerHTML = statsHtml;
+    function signalColor(dbm) {
+        if (dbm >= -50) return '#22c55e';
+        if (dbm >= -60) return '#06b6d4';
+        if (dbm >= -70) return '#eab308';
+        if (dbm >= -80) return '#f97316';
+        return '#ef4444';
+    }
 
-        var map = L.map('map').setView([6.5, -3.4], 12);
-        var baseLayers = {
+    function initMap() {
+        map = L.map('map').setView([6.5, -3.4], 12);
+        baseLayers = {
             'Streets': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
             }),
@@ -134,42 +136,56 @@
             }),
         };
         baseLayers['Streets'].addTo(map);
-        var labelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
+        labelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; CartoDB', maxZoom: 19, pane: 'overlayPane'
         });
         L.control.layers(baseLayers, { 'Labels': labelsLayer }).addTo(map);
+        cellLayer = L.layerGroup().addTo(map);
+    }
 
-        function signalColor(dbm) {
-            if (dbm >= -50) return '#22c55e';
-            if (dbm >= -60) return '#06b6d4';
-            if (dbm >= -70) return '#eab308';
-            if (dbm >= -80) return '#f97316';
-            return '#ef4444';
-        }
-
-        p.cells.forEach(function(c) {
+    function renderCells(cells) {
+        cellLayer.clearLayers();
+        cells.forEach(function(c) {
             var color = signalColor(c.signal_dbm_avg);
             var radius = Math.max(6, Math.min(18, Math.sqrt(c.sample_count) * 3));
-            var popup = '<b>' + c.dominant_network + '</b><br>' + c.signal_dbm_avg + ' dBm avg' +
+            var popup = '<b>' + (c.location_name || c.dominant_network) + '</b><br>' + c.dominant_network + '<br>' + c.signal_dbm_avg + ' dBm avg' +
                 (c.speed_mbps_avg ? '<br>' + c.speed_mbps_avg + ' mb/s avg' : '') +
-                '<br>' + c.sample_count + ' samples from ' + c.device_count + ' devices';
+                '<br>' + c.sample_count + ' samples from ' + c.device_count + ' devices' +
+                (c.confidence != null ? '<br>Confidence: ' + (c.confidence * 100).toFixed(0) + '%' : '');
             L.circleMarker([c.lat, c.lon], {
                 radius: radius, color: color, fillColor: color,
                 fillOpacity: 0.6, weight: 1
-            }).bindPopup(popup).addTo(map);
+            }).bindPopup(popup).addTo(cellLayer);
         });
-
-        if (p.cells.length > 0) {
-            var bounds = L.latLngBounds(p.cells.map(function(c) { return [c.lat, c.lon]; }));
+        if (cells.length > 0) {
+            var bounds = L.latLngBounds(cells.map(function(c) { return [c.lat, c.lon]; }));
             map.fitBounds(bounds, { padding: [30, 30] });
         }
+    }
+
+    async function loadDashboard(ssid) {
+        var qs = ssid ? '?ssid=' + encodeURIComponent(ssid) : '';
+        var resp = await fetch('/api/analytics');
+        var d = await resp.json();
+        var presp = await fetch('/api/analytics/product' + qs);
+        var p = await presp.json();
+
+        var statsHtml = '';
+        statsHtml += '<div class="stat"><div class="label">Total Scans</div><div class="value gradient">' + d.total_scans + '</div></div>';
+        statsHtml += '<div class="stat"><div class="label">Distinct Devices</div><div class="value gradient">' + p.summary.total_distinct_devices + '</div></div>';
+        statsHtml += '<div class="stat"><div class="label">Published Areas</div><div class="value gradient">' + p.summary.published_cells + '</div></div>';
+        statsHtml += '<div class="stat"><div class="label">Avg Speed</div><div class="value gradient">' + (d.avg_speed_mbps || 'N/A') + ' mb/s</div></div>';
+        statsHtml += '<div class="stat"><div class="label">Weak Zones</div><div class="value gradient">' + p.weak_zones.length + '</div></div>';
+        document.getElementById('stats').innerHTML = statsHtml;
+
+        renderCells(p.cells);
 
         var carrierHtml = '';
         p.carriers.forEach(function(c) {
             carrierHtml += '<tr><td>' + c.network + '</td><td>' + c.avg_signal_dbm + ' dBm</td><td>' +
                 (c.avg_speed_mbps || '-') + ' mb/s</td><td>' + c.sample_count + '</td><td>' + c.device_count + '</td></tr>';
         });
-        document.getElementById('carrierTable').innerHTML = carrierHtml || '<tr><td colspan="5" style="color:var(--textM)">Not enough distinct devices yet to publish a comparison</td></tr>';
+        document.getElementById('carrierTable').innerHTML = carrierHtml || '<tr><td colspan="5" style="color:var(--textM)">Not enough distinct devices yet</td></tr>';
 
         var dailyKeys = p.daily_trend.slice(-14);
         var maxAbsSignal = Math.max.apply(null, dailyKeys.map(function(r) { return Math.abs(r.avg_signal_dbm); })) || 1;
@@ -179,28 +195,42 @@
             var color = signalColor(r.avg_signal_dbm);
             dhtml += '<div class="bar-row"><div class="bar-label">' + r.date.slice(5) + '</div><div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + color + '">' + r.avg_signal_dbm + ' dBm</div></div></div>';
         });
-        document.getElementById('dailyChart').innerHTML = dhtml || '<div style="color:var(--textM);font-size:0.85em">No day has enough distinct devices yet to publish a trend</div>';
+        document.getElementById('dailyChart').innerHTML = dhtml || '<div style="color:var(--textM);font-size:0.85em">No trend data yet</div>';
 
         var weakHtml = '';
         p.weak_zones.forEach(function(z) {
-            weakHtml += '<tr><td>' + z.lat.toFixed(4) + ', ' + z.lon.toFixed(4) + '</td><td>' + z.signal_dbm_avg + ' dBm</td><td>' +
+            weakHtml += '<tr><td>' + (z.location_name || z.lat.toFixed(4) + ', ' + z.lon.toFixed(4)) + '</td><td>' + z.signal_dbm_avg + ' dBm</td><td>' +
                 (z.speed_mbps_avg || '-') + ' mb/s</td><td>' + z.sample_count + '</td><td>' + z.device_count + '</td></tr>';
         });
-        document.getElementById('weakZoneTable').innerHTML = weakHtml || '<tr><td colspan="5" style="color:var(--textM)">No weak zones found in published areas</td></tr>';
+        document.getElementById('weakZoneTable').innerHTML = weakHtml || '<tr><td colspan="5" style="color:var(--textM)">No weak zones found</td></tr>';
 
         var q = p.summary;
         document.getElementById('qualitySummary').innerHTML =
             'Date range: ' + (q.date_range.earliest ? q.date_range.earliest.slice(0,10) : '-') + ' to ' + (q.date_range.latest ? q.date_range.latest.slice(0,10) : '-') + '<br>' +
             q.total_distinct_devices + ' distinct devices have contributed data<br>' +
             q.published_cells + ' areas meet the minimum-device threshold to be published<br>' +
-            '<span style="color:var(--textM)">Areas with fewer than 3 distinct devices are withheld from every export and chart above -- no single person\'s location is ever identifiable from this dataset.</span>';
+            '<span style="color:var(--textM)">Areas with fewer than 3 distinct devices are withheld.</span>';
 
         var tbody = '';
         d.locations.slice(0, 50).forEach(function(loc) {
             tbody += '<tr><td>' + (loc.ssid || '?') + '</td><td>' + (loc.signal_dbm || '?') + ' dBm</td><td>' + (loc.speed || '-') + ' mb/s</td><td>' + loc.lat.toFixed(4) + ', ' + loc.lon.toFixed(4) + '</td><td>mobile</td></tr>';
         });
         document.getElementById('scanTable').innerHTML = tbody;
-    })();
+
+        // Populate network filter dropdown from carrier data
+        var sel = document.getElementById('networkFilter');
+        if (sel.options.length <= 1 && p.carriers.length > 0) {
+            p.carriers.forEach(function(c) {
+                var opt = document.createElement('option');
+                opt.value = c.network;
+                opt.textContent = c.network + ' (' + c.sample_count + ')';
+                sel.appendChild(opt);
+            });
+        }
+    }
+
+    initMap();
+    loadDashboard('');
     </script>
 </body>
 </html>
