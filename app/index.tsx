@@ -247,31 +247,33 @@ export default function HomeScreen() {
     if (!targetSsid) return Alert.alert('No Target', 'Tap a network first');
     setGenerating(true);
     try {
-      const step = interpolationStep;
-      const pw = interpolationPower;
-      const rad = interpolationRadius;
-      const cUrl = `${apiUrl}/api/contours?ssid=${encodeURIComponent(targetSsid)}&step=${step}&power=${pw}&radius=${rad}`;
-      const cResp = await fetch(cUrl);
-      const cData = await cResp.json();
-      if (cData.contours && cData.contours.length > 0) {
-        const contoursJson = JSON.stringify(cData.contours);
+      const meshUrl = `${apiUrl}/api/mesh?ssid=${encodeURIComponent(targetSsid)}`;
+      const meshResp = await fetch(meshUrl);
+      const meshData = await meshResp.json();
+      if (meshData.triangles && meshData.triangles.length > 0) {
+        const meshJson = JSON.stringify(meshData.triangles);
         webViewRef.current?.injectJavaScript(`
           (function() {
             if (typeof L === 'undefined' || typeof map === 'undefined') return;
             if (typeof contourLayer !== 'undefined' && contourLayer) map.removeLayer(contourLayer);
             contourLayer = L.layerGroup();
-            var contours = ${contoursJson};
+            var triangles = ${meshJson};
             var allPts = [];
-            contours.forEach(function(c) {
-              var latlngs = c.polygon.map(function(p) { return L.latLng(p[0], p[1]); });
-              allPts = allPts.concat(latlngs);
-              L.polygon(latlngs, {
-                color: c.color,
-                fillColor: c.color,
-                fillOpacity: 0.35,
-                weight: 2,
-                opacity: 0.7,
-              }).bindPopup(c.label + ' (' + c.level + ' dBm)').addTo(contourLayer);
+            triangles.forEach(function(t) {
+              var lls = t.vertices.map(function(v) { return L.latLng(v.lat, v.lng); });
+              lls.forEach(function(ll) { allPts.push(ll); });
+              var dbm = t.avg_signal_dbm;
+              var pct = Math.max(0, Math.min(1, (dbm + 100) / 60));
+              var r = Math.round(255 * (1 - pct));
+              var g = Math.round(200 * pct);
+              var color = 'rgb(' + r + ',' + g + ',80)';
+              L.polygon(lls, {
+                color: color,
+                fillColor: color,
+                fillOpacity: 0.45,
+                weight: 1,
+                opacity: 0.8,
+              }).bindPopup(dbm.toFixed(1) + ' dBm').addTo(contourLayer);
             });
             contourLayer.addTo(map);
             if (allPts.length > 0) {
@@ -280,7 +282,7 @@ export default function HomeScreen() {
           })();
           true;
         `);
-        Alert.alert('Map Loaded', cData.contours.length + ' contour levels rendered');
+        Alert.alert('Map Loaded', meshData.triangles.length + ' Delaunay triangles rendered');
         setGenerating(false);
         return;
       }
