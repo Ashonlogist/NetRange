@@ -13,10 +13,13 @@ interface AppState {
   isOnline: boolean;
 }
 
+const DEFAULT_API_URL = 'https://netrange.onrender.com';
+const LEGACY_API_URL = 'https://netrange-backend.onrender.com';
+
 const AppContext = createContext<AppState | null>(null);
 
 export function Providers({ children }: { children: ReactNode }) {
-  const [apiUrl, setApiUrl] = useState('https://netrange.onrender.com');
+  const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
   const [currentLocation, setCurrentLocation] = useState<Location.LocationObjectCoords | null>(null);
   const [deviceId, setDeviceId] = useState('');
   const [isOnline, setIsOnline] = useState(true);
@@ -36,7 +39,12 @@ export function Providers({ children }: { children: ReactNode }) {
         SecureStore.getItemAsync('apiUrl'),
         SecureStore.getItemAsync('deviceId'),
       ]);
-      if (url) setApiUrl(url);
+      const cleanedUrl = (url || '').trim().replace(/\/+$/, '');
+      const resolvedUrl = !cleanedUrl || cleanedUrl === LEGACY_API_URL
+        ? DEFAULT_API_URL
+        : cleanedUrl;
+      await SecureStore.setItemAsync('apiUrl', resolvedUrl);
+      setApiUrl(resolvedUrl);
       if (id) {
         setDeviceId(id);
       } else {

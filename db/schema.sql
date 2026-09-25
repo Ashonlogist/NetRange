@@ -29,3 +29,25 @@ create index if not exists scans_created_at_idx on scans (created_at desc);
 -- everyone else by default. Enable RLS with no policies = nobody using the
 -- anon/public key can read or write this table directly.
 alter table scans enable row level security;
+
+create table if not exists api_keys (
+    id          bigint generated always as identity primary key,
+    key         text unique not null,
+    customer    text not null,
+    daily_limit integer not null default 1000 check (daily_limit > 0),
+    active      boolean not null default true,
+    created_at  timestamptz not null default now()
+);
+
+create table if not exists api_key_usage (
+    id         bigint generated always as identity primary key,
+    key_id     bigint not null references api_keys(id) on delete cascade,
+    day        date not null default current_date,
+    hits       integer not null default 1 check (hits >= 0),
+    unique(key_id, day)
+);
+
+create index if not exists api_key_usage_day_idx on api_key_usage (day);
+
+alter table api_keys enable row level security;
+alter table api_key_usage enable row level security;

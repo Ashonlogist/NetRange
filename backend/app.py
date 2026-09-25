@@ -1,4 +1,5 @@
 import os
+import math
 import csv
 import io
 from datetime import datetime, timezone, timedelta
@@ -9,6 +10,7 @@ from db import save_scan, load_scans, get_client
 from algorithm import delaunay_interpolate, generate_contours, mesh_geojson
 from analytics import (aggregate_coverage_cells, carrier_comparison,
                         daily_quality_trend, weak_zones, data_quality_summary)
+import analytics
 from geocoding import reverse_geocode_cells
 from api_keys import require_api_key
 
@@ -50,6 +52,17 @@ def api_version():
             "Settings: API URL hidden",
         ],
     })
+
+
+@app.route("/api/health")
+def api_health():
+    try:
+        client = get_client()
+        client.table("scans").select("id").limit(1).execute()
+        return jsonify({"status": "ok", "database": "ok"})
+    except Exception:
+        app.logger.exception("Database health check failed")
+        return jsonify({"status": "degraded", "database": "error"}), 503
 
 
 @app.route("/api/scan", methods=["GET"])

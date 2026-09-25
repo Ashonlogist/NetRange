@@ -1,10 +1,15 @@
 services:
   - type: web
-    name: netrange-backend
+    name: netrange
     runtime: python
     rootDir: backend
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 2
     healthCheckPath: /
+    envVars:
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
+        sync: false
     autoDeploy: true

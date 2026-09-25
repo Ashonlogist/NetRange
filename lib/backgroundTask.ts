@@ -16,6 +16,8 @@ import * as SecureStore from 'expo-secure-store';
 import NetInfo from '@react-native-community/netinfo';
 
 export const BACKGROUND_SCAN_TASK = 'netrange-background-scan';
+const DEFAULT_API_URL = 'https://netrange.onrender.com';
+const LEGACY_API_URL = 'https://netrange-backend.onrender.com';
 
 let _registered = false;
 
@@ -26,11 +28,15 @@ let _registered = false;
  */
 TaskManager.defineTask(BACKGROUND_SCAN_TASK, async () => {
   try {
-    const [deviceId, apiUrl] = await Promise.all([
+    const [deviceId, savedApiUrl] = await Promise.all([
       SecureStore.getItemAsync('deviceId'),
       SecureStore.getItemAsync('apiUrl'),
     ]);
-    if (!deviceId || !apiUrl) return;
+    const cleanedUrl = (savedApiUrl || '').trim().replace(/\/+$/, '');
+    const apiUrl = !cleanedUrl || cleanedUrl === LEGACY_API_URL
+      ? DEFAULT_API_URL
+      : cleanedUrl;
+    if (!deviceId) return;
 
     // Location -- the task only fires on location updates, so one read is enough
     let loc: Location.LocationObject;

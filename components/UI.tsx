@@ -6,6 +6,7 @@ import {
   Pressable,
   TextInput,
   ActivityIndicator,
+  type StyleProp,
   type ViewStyle,
   type TextStyle,
 } from 'react-native';
@@ -68,7 +69,7 @@ export function Card({
 }: {
   children: React.ReactNode;
   onPress?: () => void;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
   glow?: boolean;
   [key: string]: any;
 }) {
