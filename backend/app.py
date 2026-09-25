@@ -271,9 +271,7 @@ def api_scan_post():
             continue
         seen_bssids.add(bssid)
         signal_dbm = to_dbm(n.get("strength"))
-        if signal_dbm is None:
-            signal_dbm = -70.0
-        signal_pct = max(0, min(100, round((signal_dbm + 100) * 2)))
+        signal_pct = None if signal_dbm is None else max(0, min(100, round((signal_dbm + 100) * 2)))
         records.append({
             "ssid": ssid,
             "bssid": bssid,
@@ -293,9 +291,11 @@ def api_scan_post():
 
     if cellular and isinstance(cellular, dict):
         signal_strength = cellular.get("signalStrength")
+        # Left as NULL when the platform gave us no reading. Substituting a
+        # plausible -70 here is what made every cellular scan look identical
+        # and produced a flat, meaningless coverage map; a NULL is skipped by
+        # the interpolator, which is the honest outcome.
         cell_dbm = to_dbm(signal_strength)
-        if cell_dbm is None:
-            cell_dbm = -70.0
         records.append({
             "ssid": (cellular.get("carrier") or "Cellular").strip(),
             "bssid": "",
@@ -315,10 +315,14 @@ def api_scan_post():
 
     count = save_scan(records) if records else 0
     total = len(load_scans())
+    no_signal = sum(1 for r in records if r["signal_dbm"] is None)
     msg = None
     if count == 0 and target:
         msg = f"No scan data for SSID '{target}'. Make sure the phone sees that network."
-    return jsonify({"count": count, "totalScans": total, "message": msg})
+    elif no_signal:
+        msg = (f"{no_signal} of {len(records)} records had no signal reading and were "
+               f"stored without one. The device did not report a signal strength.")
+    return jsonify({"count": count, "totalScans": total, "noSignal": no_signal, "message": msg})
 
 
 @app.route("/api/scans", methods=["GET"])
@@ -336,13 +340,17 @@ def api_heatmap():
         if s.get("lat") is not None and s.get("lon") is not None:
             if ssid_filter and s.get("ssid", "").lower() != ssid_filter:
                 continue
-            weight = max(0.1, min(1.0, (s.get("signal_dbm", -80) + 100) / 50))
+            # No reading means no weight to derive. Matches prepare_points and
+            # the analytics cell builder, which both skip a null signal.
+            if s.get("signal_dbm") is None:
+                continue
+            weight = max(0.1, min(1.0, (s["signal_dbm"] + 100) / 50))
             points.append({
                 "lat": s["lat"],
                 "lng": s["lon"],
                 "weight": weight,
                 "ssid": s.get("ssid", ""),
-                "signal_dbm": s.get("signal_dbm", 0),
+                "signal_dbm": s["signal_dbm"],
             })
     return jsonify({"points": points})
 
@@ -357,13 +365,15 @@ def api_current():
         for s in scans:
             if s.get("lat") is not None and s.get("lon") is not None:
                 if s.get("ssid", "").lower() == ssid.lower():
-                    weight = max(0.1, min(1.0, (s.get("signal_dbm", -80) + 100) / 50))
+                    if s.get("signal_dbm") is None:
+                        continue
+                    weight = max(0.1, min(1.0, (s["signal_dbm"] + 100) / 50))
                     points.append({
                         "lat": s["lat"],
                         "lng": s["lon"],
                         "weight": weight,
                         "ssid": s.get("ssid", ""),
-                        "signal_dbm": s.get("signal_dbm", 0),
+                        "signal_dbm": s["signal_dbm"],
                     })
     return jsonify({
         "connected": conn.get("connected", False),
