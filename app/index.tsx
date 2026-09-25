@@ -210,34 +210,8 @@ export default function HomeScreen() {
         const meshResp = await fetch(`${apiUrl}/api/mesh?ssid=${encodeURIComponent(autoTarget)}`);
         const meshData = await meshResp.json();
         if (meshData.triangles && meshData.triangles.length > 0) {
-          const meshJson = JSON.stringify(meshData.triangles);
           webViewRef.current?.injectJavaScript(`
-            (function() {
-              if (typeof L === 'undefined' || typeof map === 'undefined') return;
-              if (typeof contourLayer !== 'undefined' && contourLayer) map.removeLayer(contourLayer);
-              contourLayer = L.layerGroup();
-              var triangles = ${meshJson};
-              var allPts = [];
-              triangles.forEach(function(t) {
-                var lls = t.vertices.map(function(v) { return L.latLng(v.lat, v.lng); });
-                lls.forEach(function(ll) { allPts.push(ll); });
-                var dbm = t.avg_signal_dbm;
-                var color;
-                if (dbm >= -50) color = '#22c55e';
-                else if (dbm >= -60) color = '#06b6d4';
-                else if (dbm >= -70) color = '#eab308';
-                else if (dbm >= -80) color = '#f97316';
-                else color = '#ef4444';
-                L.polygon(lls, {
-                  color: color, fillColor: color,
-                  fillOpacity: 0.5, weight: 0, opacity: 0,
-                }).bindPopup(dbm.toFixed(1) + ' dBm' + (t.download_speed_mbps ? '<br>' + t.download_speed_mbps + ' mb/s' : '')).addTo(contourLayer);
-              });
-              contourLayer.addTo(map);
-              if (allPts.length > 0) {
-                map.fitBounds(L.latLngBounds(allPts), { padding: [50, 50] });
-              }
-            })();
+            window.renderMeshOnMap(${JSON.stringify(meshData.triangles)});
             true;
           `);
         }
@@ -245,6 +219,16 @@ export default function HomeScreen() {
     }, 120000);
     return () => clearInterval(interval);
   }, [targetSsid, apiUrl, deviceId]);
+
+  const [coverageMetric, setCoverageMetricState] = useState<'speed' | 'signal'>('speed');
+
+  const handleMetric = (metric: 'speed' | 'signal') => {
+    setCoverageMetricState(metric);
+    webViewRef.current?.injectJavaScript(`
+      if (typeof setCoverageMetric === 'function') setCoverageMetric('${metric}');
+      true;
+    `);
+  };
 
   const togglePanel = () => {
     const toValue = panelOpen ? PANEL_H : 0;
@@ -431,37 +415,8 @@ export default function HomeScreen() {
       const meshResp = await fetch(meshUrl);
       const meshData = await meshResp.json();
       if (meshData.triangles && meshData.triangles.length > 0) {
-        const meshJson = JSON.stringify(meshData.triangles);
         webViewRef.current?.injectJavaScript(`
-          (function() {
-            if (typeof L === 'undefined' || typeof map === 'undefined') return;
-            if (typeof contourLayer !== 'undefined' && contourLayer) map.removeLayer(contourLayer);
-            contourLayer = L.layerGroup();
-            var triangles = ${meshJson};
-            var allPts = [];
-            triangles.forEach(function(t) {
-              var lls = t.vertices.map(function(v) { return L.latLng(v.lat, v.lng); });
-              lls.forEach(function(ll) { allPts.push(ll); });
-              var dbm = t.avg_signal_dbm;
-              var color;
-              if (dbm >= -50) color = '#22c55e';
-              else if (dbm >= -60) color = '#06b6d4';
-              else if (dbm >= -70) color = '#eab308';
-              else if (dbm >= -80) color = '#f97316';
-              else color = '#ef4444';
-              L.polygon(lls, {
-                color: color,
-                fillColor: color,
-                fillOpacity: 0.5,
-                weight: 0,
-                opacity: 0,
-              }).bindPopup(dbm.toFixed(1) + ' dBm').addTo(contourLayer);
-            });
-            contourLayer.addTo(map);
-            if (allPts.length > 0) {
-              map.fitBounds(L.latLngBounds(allPts), { padding: [50, 50] });
-            }
-          })();
+          window.renderMeshOnMap(${JSON.stringify(meshData.triangles)});
           true;
         `);
         Alert.alert('Map Loaded', meshData.triangles.length + ' Delaunay triangles rendered');
@@ -721,6 +676,23 @@ export default function HomeScreen() {
                   <Button title={generating ? 'Loading...' : 'Generate Map'} onPress={handleGenerateCoverage} disabled={generating} loading={generating} icon="🗺️" style={{ flex: 1 }} />
                 </View>
               )}
+
+              <View style={s.metricRow}>
+                <Text style={s.metricLabel}>Colour map by</Text>
+                <View style={s.metricSeg}>
+                  {(['speed', 'signal'] as const).map((m) => (
+                    <TouchableOpacity
+                      key={m}
+                      style={[s.metricSegBtn, coverageMetric === m && s.metricSegBtnActive]}
+                      onPress={() => handleMetric(m)}
+                    >
+                      <Text style={[s.metricSegText, coverageMetric === m && s.metricSegTextActive]}>
+                        {m === 'speed' ? 'Speed' : 'Signal'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
             </>
           ) : (
             <>
@@ -948,6 +920,13 @@ const s = StyleSheet.create({
   signalCol: { alignItems: 'flex-end', gap: 3 },
   signalDbm: { fontSize: 14, fontWeight: '700', fontFamily: 'monospace' },
   actions: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  metricRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 10 },
+  metricLabel: { fontSize: 11, fontWeight: '600', color: T.textMuted, textTransform: 'uppercase', letterSpacing: 0.6 },
+  metricSeg: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 10, padding: 3, gap: 3 },
+  metricSegBtn: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 8 },
+  metricSegBtnActive: { backgroundColor: T.accent },
+  metricSegText: { fontSize: 12, fontWeight: '600', color: T.textMuted },
+  metricSegTextActive: { color: '#fff' },
   errorCard: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(239,68,68,0.1)', borderColor: 'rgba(239,68,68,0.2)' },
   errorText: { color: '#fca5a5', fontSize: 12, flex: 1 },
   targetCard: { borderColor: T.green, borderWidth: 1 },

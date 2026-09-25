@@ -721,6 +721,44 @@
             border: 1px solid var(--glass-border);
         }
         .layer-btn .layer-icon { font-size: 1.6em; }
+
+        /* ===== COVERAGE METRIC TOGGLE (speed <-> signal) ===== */
+        .metric-toggle {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin-top: 8px;
+            padding: 4px;
+            background: var(--surface);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+        }
+        .metric-toggle-label {
+            font-size: 0.6em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            padding: 0 6px;
+            flex-shrink: 0;
+        }
+        .metric-btn {
+            flex: 1;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-family: inherit;
+            font-size: 0.7em;
+            font-weight: 600;
+            padding: 6px 8px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .metric-btn.active {
+            background: var(--accent);
+            color: #fff;
+        }
         @media (max-width: 900px) {
             /* right only: the top offset is set by the band layout further
                down, which has to clear the full-width search field. */
@@ -747,9 +785,9 @@
                    beside a 420px search bar */
         .map-search, .toast, .map-fabs { left: calc(50% + var(--map-inset) / 2); }
 
-        @media (min-width: 1360px) {
-            /* Only here is the map wide enough to carry the 213px switcher
-               beside a 420px search bar: below 1280px the two overlap. */
+        @media (min-width: 1450px) {
+            /* The switcher is four buttons, ~300px wide. It only clears the
+               420px search bar above ~1450px; at 1366 they overlapped. */
             .layer-switcher { top: 24px; }
         }
         @media (min-width: 901px) {
@@ -961,6 +999,15 @@
                 <div class="btn-group">
                     <button class="btn btn-success btn-sm" onclick="generateCoverage()">Generate Map</button>
                     <button class="btn btn-ghost btn-sm" onclick="clearCoverage()">Clear</button>
+                </div>
+                <div class="metric-toggle" role="group" aria-label="Colour coverage by">
+                    <span class="metric-toggle-label">Colour by</span>
+                    <button class="metric-btn active" data-metric="speed" onclick="setCoverageMetric('speed')">
+                        Speed
+                    </button>
+                    <button class="metric-btn" data-metric="signal" onclick="setCoverageMetric('signal')">
+                        Signal
+                    </button>
                 </div>
                 <div id="status" class="status-bar" style="margin-top:12px">
                     <span class="status-dot"></span>
@@ -1351,6 +1398,74 @@
             });
         }
 
+        /* Coverage can be read as throughput or as raw signal. Speed is what
+           most people actually want from a coverage map; signal is kept for
+           troubleshooting. Both are higher-is-better, so one band table
+           drives each, just with different thresholds. */
+        var COVERAGE_METRIC = 'speed';
+        var METRIC_BANDS = {
+            speed:  [[25, 'excellent'], [10, 'good'], [5, 'fair'], [2, 'poor']],
+            signal: [[-50, 'excellent'], [-60, 'good'], [-70, 'fair'], [-80, 'poor']],
+        };
+        var METRIC_COLORS = {
+            excellent: '#22c55e', good: '#06b6d4', fair: '#eab308',
+            poor: '#f97316', none: '#64748b',
+        };
+
+        function metricValue(t) {
+            return COVERAGE_METRIC === 'speed' ? t.avg_download_speed_mbps : t.avg_signal_dbm;
+        }
+        function metricBand(v) {
+            // No reading is shown as its own grey band rather than being
+            // folded into the worst one, which would read as "terrible here".
+            if (v === null || v === undefined || isNaN(v)) return 'none';
+            var bands = METRIC_BANDS[COVERAGE_METRIC];
+            for (var i = 0; i < bands.length; i++) {
+                if (v >= bands[i][0]) return bands[i][1];
+            }
+            return 'poor';
+        }
+        function metricColor(v) { return METRIC_COLORS[metricBand(v)]; }
+        function metricUnit() { return COVERAGE_METRIC === 'speed' ? ' Mbps' : ' dBm'; }
+        function metricLabel() { return COVERAGE_METRIC === 'speed' ? 'Speed' : 'Signal'; }
+
+        function setCoverageMetric(metric) {
+            if (metric !== 'speed' && metric !== 'signal') return;
+            COVERAGE_METRIC = metric;
+            document.querySelectorAll('.metric-btn').forEach(function (b) {
+                b.classList.toggle('active', b.dataset.metric === metric);
+            });
+            try { localStorage.setItem('netrange.coverageMetric', metric); } catch (e) {}
+            if (coverageLayer) generateCoverage();
+            showToast('Colouring by ' + metricLabel().toLowerCase());
+        }
+
+        /* Single renderer for the triangle layer, so the app's injected script
+           and this page cannot drift apart on colours or bands. */
+        window.renderMeshOnMap = function (triangles) {
+            if (!triangles || !triangles.length) return 0;
+            if (typeof L === 'undefined' || typeof map === 'undefined') return 0;
+            if (typeof contourLayer !== 'undefined' && contourLayer) map.removeLayer(contourLayer);
+            contourLayer = L.layerGroup();
+            var allPts = [];
+            triangles.forEach(function (t) {
+                var lls = t.vertices.map(function (v) { return L.latLng(v.lat, v.lng); });
+                lls.forEach(function (ll) { allPts.push(ll); });
+                var val = metricValue(t);
+                var color = metricColor(val);
+                var shown = (val === null || val === undefined)
+                    ? 'no reading'
+                    : (COVERAGE_METRIC === 'speed' ? val.toFixed(1) : val.toFixed(0)) + metricUnit();
+                L.polygon(lls, {
+                    color: color, fillColor: color,
+                    fillOpacity: 0.5, weight: 0, opacity: 0,
+                }).bindPopup('<b>' + metricLabel() + ':</b> ' + shown).addTo(contourLayer);
+            });
+            contourLayer.addTo(map);
+            if (allPts.length) map.fitBounds(L.latLngBounds(allPts), { padding: [50, 50] });
+            return triangles.length;
+        };
+
         async function generateCoverage() {
             var filterSsid = document.getElementById("targetSsidFilter").value.trim();
             if (!filterSsid) {
@@ -1376,17 +1491,23 @@
                 data.triangles.forEach(function(t) {
                     var lls = t.vertices.map(function(v) { return L.latLng(v.lat, v.lng); });
                     lls.forEach(function(ll) { allPts.push(ll); });
-                    var dbm = t.avg_signal_dbm;
-                    var color;
-                    if (dbm >= -50) color = '#22c55e';
-                    else if (dbm >= -60) color = '#06b6d4';
-                    else if (dbm >= -70) color = '#eab308';
-                    else if (dbm >= -80) color = '#f97316';
-                    else color = '#ef4444';
+                    var val = metricValue(t);
+                    var color = metricColor(val);
+                    var shown = (val === null || val === undefined)
+                        ? 'no reading'
+                        : (COVERAGE_METRIC === 'speed' ? val.toFixed(1) : val.toFixed(0)) + metricUnit();
+                    var other = COVERAGE_METRIC === 'speed'
+                        ? t.avg_signal_dbm
+                        : t.avg_download_speed_mbps;
+                    var otherTxt = (other === null || other === undefined)
+                        ? 'no reading'
+                        : (COVERAGE_METRIC === 'speed' ? other.toFixed(0) + ' dBm' : other.toFixed(1) + ' Mbps');
                     L.polygon(lls, {
                         color: color, fillColor: color,
                         fillOpacity: 0.5, weight: 0, opacity: 0,
-                    }).bindPopup(dbm.toFixed(1) + ' dBm' + (t.avg_download_speed_mbps ? '<br>' + t.avg_download_speed_mbps + ' mb/s' : '')).addTo(coverageLayer);
+                    }).bindPopup('<b>' + metricLabel() + ':</b> ' + shown +
+                        '<br>' + (COVERAGE_METRIC === 'speed' ? 'Signal' : 'Speed') + ': ' + otherTxt)
+                      .addTo(coverageLayer);
                 });
 
                 if (data.points) {
@@ -1412,27 +1533,32 @@
 
                 var triCount = data.triangles.length;
                 var ptCount = data.points ? data.points.length : 0;
-                var dbms = data.triangles.map(function(t) { return t.avg_signal_dbm; });
-                var avg = dbms.length ? (dbms.reduce(function(a,b){return a+b;},0)/dbms.length).toFixed(1) : 'N/A';
-                var excellent = dbms.filter(function(d){return d >= -50;}).length;
-                var good = dbms.filter(function(d){return d >= -60 && d < -50;}).length;
-                var fair = dbms.filter(function(d){return d >= -70 && d < -60;}).length;
-                var weak = dbms.filter(function(d){return d < -70;}).length;
+                var vals = data.triangles.map(metricValue).filter(function (v) {
+                    return v !== null && v !== undefined && !isNaN(v);
+                });
+                var avg = vals.length
+                    ? (vals.reduce(function (a, b) { return a + b; }, 0) / vals.length)
+                    : null;
+                var avgTxt = avg === null ? 'N/A'
+                    : (COVERAGE_METRIC === 'speed' ? avg.toFixed(1) : avg.toFixed(0)) + metricUnit();
+                var counts = { excellent: 0, good: 0, fair: 0, poor: 0, none: 0 };
+                data.triangles.forEach(function (t) { counts[metricBand(metricValue(t))]++; });
 
                 document.getElementById("coverage-stats").innerHTML =
                     '<div class="stat-row"><span class="stat-label">Triangles</span><span class="stat-value">' + triCount + '</span></div>' +
                     '<div class="stat-row"><span class="stat-label">Scan points</span><span class="stat-value">' + ptCount + '</span></div>' +
-                    '<div class="stat-row"><span class="stat-label">Avg signal</span><span class="stat-value">' + avg + ' dBm</span></div>' +
-                    '<div class="stat-row"><span class="stat-label">Excellent</span><span class="stat-value" style="color:var(--green)">' + excellent + '</span></div>' +
-                    '<div class="stat-row"><span class="stat-label">Good</span><span class="stat-value" style="color:var(--cyan)">' + good + '</span></div>' +
-                    '<div class="stat-row"><span class="stat-label">Fair</span><span class="stat-value" style="color:var(--yellow)">' + fair + '</span></div>' +
-                    '<div class="stat-row"><span class="stat-label">Weak</span><span class="stat-value" style="color:var(--red)">' + weak + '</span></div>';
+                    '<div class="stat-row"><span class="stat-label">Avg ' + metricLabel().toLowerCase() + '</span><span class="stat-value">' + avgTxt + '</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Excellent</span><span class="stat-value" style="color:var(--green)">' + counts.excellent + '</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Good</span><span class="stat-value" style="color:var(--cyan)">' + counts.good + '</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Fair</span><span class="stat-value" style="color:var(--yellow)">' + counts.fair + '</span></div>' +
+                    '<div class="stat-row"><span class="stat-label">Poor</span><span class="stat-value" style="color:var(--orange)">' + counts.poor + '</span></div>' +
+                    (counts.none ? '<div class="stat-row"><span class="stat-label">No reading</span><span class="stat-value">' + counts.none + '</span></div>' : '');
 
                 document.getElementById("coverage-summary").innerHTML =
-                    '<span class="coverage-badge excellent">' + excellent + ' excellent</span>' +
-                    '<span class="coverage-badge good">' + good + ' good</span>' +
-                    '<span class="coverage-badge fair">' + fair + ' fair</span>' +
-                    '<span class="coverage-badge weak">' + weak + ' weak</span>';
+                    '<span class="coverage-badge excellent">' + counts.excellent + ' excellent</span>' +
+                    '<span class="coverage-badge good">' + counts.good + ' good</span>' +
+                    '<span class="coverage-badge fair">' + counts.fair + ' fair</span>' +
+                    '<span class="coverage-badge weak">' + counts.poor + ' poor</span>';
 
                 document.getElementById("coverage-stats-card").style.display = "block";
                 setStatus("Coverage generated \u2014 " + triCount + " triangles, " + ptCount + " points");
@@ -1810,7 +1936,13 @@
         }
 
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', function() { initMap(); initSearch(); loadAvailableNetworks(); });
+            document.addEventListener('DOMContentLoaded', function() {
+                initMap(); initSearch(); loadAvailableNetworks();
+                try {
+                    var saved = localStorage.getItem('netrange.coverageMetric');
+                    if (saved === 'speed' || saved === 'signal') setCoverageMetric(saved);
+                } catch (e) {}
+            });
         } else {
             initMap();
             initSearch();
