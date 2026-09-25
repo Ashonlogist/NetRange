@@ -722,8 +722,9 @@
         }
         .layer-btn .layer-icon { font-size: 1.6em; }
         @media (max-width: 900px) {
+            /* right only: the top offset is set by the band layout further
+               down, which has to clear the full-width search field. */
             .layer-switcher {
-                top: 12px;
                 right: 12px;
             }
             .layer-btn { padding: 6px 8px; font-size: 0.6em; }
