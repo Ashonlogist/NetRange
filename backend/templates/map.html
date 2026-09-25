@@ -595,7 +595,7 @@
         .map-fabs {
             position: fixed;
             bottom: 24px;
-            left: 50%;
+            left: calc(50% + var(--map-inset) / 2);
             transform: translateX(-50%);
             z-index: 400;
             display: flex;
@@ -659,9 +659,11 @@
         .toast {
             position: fixed;
             top: 24px;
-            left: 50%;
+            left: calc(50% + var(--map-inset) / 2);
             transform: translateX(-50%) translateY(-100px);
-            z-index: 1000;
+            /* Below the search (900) so a toast never paints over the open
+               suggestion list, but above the map controls it sits over. */
+            z-index: 800;
             padding: 12px 20px;
             background: var(--glass-bg);
             backdrop-filter: blur(var(--glass-blur));
@@ -683,7 +685,7 @@
         /* ===== LAYER SWITCHER ===== */
         .layer-switcher {
             position: fixed;
-            top: 24px;
+            top: 124px;
             right: 24px;
             z-index: 500;
             display: flex;
@@ -727,11 +729,47 @@
             .layer-btn { padding: 6px 8px; font-size: 0.6em; }
         }
 
-        /* --- Location search (top centre) --- */
+        /* Every map overlay is centred on the map area, not the viewport.
+           #sidebar is a 380px flex sibling of #map, so the viewport's centre
+           sits 190px left of the map's centre: the search bar used to hang
+           over the sidebar and paint on top of it (z 900 vs the sidebar's
+           100) whenever the window was under ~1000px wide. */
+        :root { --map-inset: 0px; }
+        @media (min-width: 901px) {
+            :root { --map-inset: 380px; }
+        }
+
+        /* Vertical bands, so nothing lands on anything else:
+             24px  search (centred on the map)  [+ layer switcher when wide]
+             76px  toast  (centred, full width to itself)
+            124px  layer switcher, once the map is too narrow to fit it
+                   beside a 420px search bar */
+        .map-search, .toast, .map-fabs { left: calc(50% + var(--map-inset) / 2); }
+
+        @media (min-width: 1360px) {
+            /* Only here is the map wide enough to carry the 213px switcher
+               beside a 420px search bar: below 1280px the two overlap. */
+            .layer-switcher { top: 24px; }
+        }
+        @media (min-width: 901px) {
+            .toast { top: 76px; }
+        }
+        @media (max-width: 900px) {
+            .toast { top: 64px; }
+            .layer-switcher { top: 108px; }
+            /* Leaflet's own controls carry z-index 1000 and would paint over
+               both the full-width search field and its suggestion list, so
+               the zoom buttons move out of the top strip entirely. The
+               bottom-left is the one corner the FABs and menu button
+               leave free. */
+            .leaflet-top.leaflet-left { top: auto; bottom: 12px; }
+        }
+
+        /* Location search (top centre) */
         .map-search {
             position: fixed;
             top: 24px;
-            left: 50%;
+            left: calc(50% + var(--map-inset) / 2);
             transform: translateX(-50%);
             z-index: 900;
             width: min(420px, calc(100vw - 48px));
@@ -838,14 +876,8 @@
             color: var(--text-muted);
             text-align: center;
         }
-        /* Toast sat top-centre already; drop it below the search bar */
         @media (max-width: 900px) {
             .map-search { top: 12px; width: calc(100vw - 24px); }
-            .toast { top: 76px; }
-            .layer-switcher { top: 68px; }
-        }
-        @media (min-width: 901px) {
-            .toast { top: 84px; }
         }
     </style>
 </head>
