@@ -37,6 +37,7 @@ from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
 MIN_POINTS_FOR_MESH = 3
 DEFAULT_HALF_LIFE_SECONDS = 15 * 60  # a scan from 15 min ago counts half as much
 DEFAULT_MIN_ACCURACY_WEIGHT = 0.15   # even a bad GPS fix keeps some influence
+DEFAULT_MIN_RECENCY_WEIGHT = 1e-9    # floor so stale scans can't zero out an anchor
 DEFAULT_STAY_RADIUS_M = 12.0         # floor for "same spot" -- consumer GPS is rarely
                                       # genuinely better than this even when it claims to be,
                                       # especially indoors where accuracy is often optimistic
@@ -75,7 +76,10 @@ def recency_weight(timestamp, now=None, half_life_seconds=DEFAULT_HALF_LIFE_SECO
     age = max(0.0, now - ts)
     if half_life_seconds <= 0:
         return 1.0
-    return 0.5 ** (age / half_life_seconds)
+    # 0.5 ** x underflows to exactly 0.0 once x passes ~1074, which at this
+    # half-life is only ~11 days. A zero weight drives w_sum to 0 and divides
+    # by zero when anchors merge, so keep a tiny positive floor.
+    return max(DEFAULT_MIN_RECENCY_WEIGHT, 0.5 ** (age / half_life_seconds))
 
 
 def accuracy_weight(accuracy, min_weight=DEFAULT_MIN_ACCURACY_WEIGHT):
@@ -198,8 +202,9 @@ def _merge_into_anchor(anchor, p):
     anchor["lon_sum"] += p["lon"] * p["weight"]
     anchor["sig_sum"] += p["signal_dbm"] * p["weight"]
     anchor["w_sum"] += p["weight"]
-    anchor["lat"] = anchor["lat_sum"] / anchor["w_sum"]
-    anchor["lon"] = anchor["lon_sum"] / anchor["w_sum"]
+    w = anchor["w_sum"] or 1e-9
+    anchor["lat"] = anchor["lat_sum"] / w
+    anchor["lon"] = anchor["lon_sum"] / w
     anchor["accuracy_m"] = min(anchor["accuracy_m"], p["accuracy_m"])
     anchor["max_weight"] = max(anchor["max_weight"], p["weight"])
     if p.get("download_speed_mbps") is not None:
