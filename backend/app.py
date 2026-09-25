@@ -22,7 +22,12 @@ DASHBOARD_PASS = os.environ.get("DASHBOARD_PASSWORD", "netrange2026")
 app.secret_key = DASHBOARD_SECRET
 
 APP_VERSION = "1.4.1"
-APK_URL = "https://netrange.ashonlogist.website/download/netrange.apk"
+# The APK is published as a GitHub release asset, not served from this
+# service: the build output is gitignored, so a git-deployed instance can
+# never have it on disk. Override with APK_URL if hosting ever changes.
+APK_URL = os.environ.get("APK_URL") or (
+    f"https://github.com/Ashonlogist/NetRange/releases/download/v{APP_VERSION}/netrange.apk"
+)
 
 
 @app.route("/")

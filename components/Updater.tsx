@@ -41,6 +41,18 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
+async function isApkReachable(url: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    const resp = await fetch(url, { method: 'HEAD', signal: controller.signal });
+    clearTimeout(timer);
+    return resp.ok;
+  } catch {
+    return false;
+  }
+}
+
 export function UpdaterProvider({ children }: { children: React.ReactNode }) {
   const { apiUrl } = useApp();
   const [state, setState] = useState<UpdateState>('idle');
@@ -75,6 +87,17 @@ export function UpdaterProvider({ children }: { children: React.ReactNode }) {
       if (compareVersions(data.version, installed) <= 0) {
         setState('idle');
         if (!silent) Alert.alert('Up to date', `You're on the latest version (v${installed}).`);
+        return;
+      }
+      if (!data.apkUrl || !(await isApkReachable(data.apkUrl))) {
+        setState('error');
+        setError('Update download unavailable');
+        if (!silent) {
+          Alert.alert(
+            `Update v${data.version} unavailable`,
+            'The update file could not be reached. Please try again later.'
+          );
+        }
         return;
       }
       setState('available');
