@@ -16,9 +16,10 @@ import * as SecureStore from 'expo-secure-store';
 import NetInfo from '@react-native-community/netinfo';
 
 export const BACKGROUND_SCAN_TASK = 'netrange-background-scan';
-const DEFAULT_API_URL = 'https://netrange-dkb6.onrender.com';
+const DEFAULT_API_URL = 'https://netrange.ashonlogist.website';
 const LEGACY_API_URLS = [
   'https://netrange.onrender.com',
+  'https://netrange-dkb6.onrender.com',
   'https://netrange-backend.onrender.com',
 ];
 

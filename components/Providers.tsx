@@ -13,9 +13,10 @@ interface AppState {
   isOnline: boolean;
 }
 
-const DEFAULT_API_URL = 'https://netrange-dkb6.onrender.com';
+const DEFAULT_API_URL = 'https://netrange.ashonlogist.website';
 const LEGACY_API_URLS = [
   'https://netrange.onrender.com',
+  'https://netrange-dkb6.onrender.com',
   'https://netrange-backend.onrender.com',
 ];
 
