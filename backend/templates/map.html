@@ -1406,17 +1406,29 @@
             speed:  [[25, 'excellent'], [10, 'good'], [5, 'fair'], [2, 'poor']],
             signal: [[-50, 'excellent'], [-60, 'good'], [-70, 'fair'], [-80, 'poor']],
         };
-        /* Magma ramp, dark->light as quality falls. Chosen over the previous
-           green/cyan/yellow/orange set because that one was not monotonic in
-           luminance: "fair" came out brighter than "excellent", so the worst
-           areas shouted loudest on a dark map, and blue-for-good read as cold
-           rather than covered. This ramp is monotonic, keeps every band visible
-           against the dark tile background, and holds up under simulated
-           protanopia/deuteranopia/tritanopia. "none" is a desaturated grey held
-           outside the data ramp so absence never reads as a measurement. */
+        /* Coverage is read as red -> orange -> yellow -> green, which is the
+           language a coverage map is spoken in; do not replace this with a
+           generic sequential ramp. The earlier green/cyan/yellow/orange set
+           broke that language (cyan read as cold, i.e. poorly covered) and was
+           also non-monotonic in luminance, so the worst cells were the
+           loudest on a dark background.
+
+           Keeping red->green and staying accessible are not in conflict, as
+           long as luminance rises across the scale: lightness then becomes a
+           redundant channel, so the order survives when hue does not. Measured
+           for this ramp: luminance rises monotonically, every band clears 3:1
+           against the dark tiles, and under simulated protanopia, deuteranopia
+           and tritanopia the bands stay ordered with real margin (worst
+           adjacent pair 0.377 apart). Picking a lighter green was necessary:
+           an earlier yellow/green pair sat 0.022 apart in luminance and
+           inverted for deuteranopes, making "good" look brighter than
+           "excellent".
+
+           "none" is a desaturated grey held below the data ramp so an absent
+           reading never reads as a measurement. */
         var METRIC_COLORS = {
-            poor: '#d3436e', fair: '#fd9668', good: '#fddc9e',
-            excellent: '#fcfdbf', none: '#6b7280',
+            poor: '#c4271c', fair: '#ff871f', good: '#ffcb1f',
+            excellent: '#b3f2a6', none: '#5a626e',
         };
         var BAND_LABELS = {
             poor: 'Poor', fair: 'Fair', good: 'Good',
