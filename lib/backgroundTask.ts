@@ -16,8 +16,11 @@ import * as SecureStore from 'expo-secure-store';
 import NetInfo from '@react-native-community/netinfo';
 
 export const BACKGROUND_SCAN_TASK = 'netrange-background-scan';
-const DEFAULT_API_URL = 'https://netrange.onrender.com';
-const LEGACY_API_URL = 'https://netrange-backend.onrender.com';
+const DEFAULT_API_URL = 'https://netrange-dkb6.onrender.com';
+const LEGACY_API_URLS = [
+  'https://netrange.onrender.com',
+  'https://netrange-backend.onrender.com',
+];
 
 let _registered = false;
 
@@ -33,7 +36,7 @@ TaskManager.defineTask(BACKGROUND_SCAN_TASK, async () => {
       SecureStore.getItemAsync('apiUrl'),
     ]);
     const cleanedUrl = (savedApiUrl || '').trim().replace(/\/+$/, '');
-    const apiUrl = !cleanedUrl || cleanedUrl === LEGACY_API_URL
+    const apiUrl = !cleanedUrl || LEGACY_API_URLS.includes(cleanedUrl)
       ? DEFAULT_API_URL
       : cleanedUrl;
     if (!deviceId) return;

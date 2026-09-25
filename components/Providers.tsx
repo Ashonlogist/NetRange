@@ -13,8 +13,11 @@ interface AppState {
   isOnline: boolean;
 }
 
-const DEFAULT_API_URL = 'https://netrange.onrender.com';
-const LEGACY_API_URL = 'https://netrange-backend.onrender.com';
+const DEFAULT_API_URL = 'https://netrange-dkb6.onrender.com';
+const LEGACY_API_URLS = [
+  'https://netrange.onrender.com',
+  'https://netrange-backend.onrender.com',
+];
 
 const AppContext = createContext<AppState | null>(null);
 
@@ -40,7 +43,7 @@ export function Providers({ children }: { children: ReactNode }) {
         SecureStore.getItemAsync('deviceId'),
       ]);
       const cleanedUrl = (url || '').trim().replace(/\/+$/, '');
-      const resolvedUrl = !cleanedUrl || cleanedUrl === LEGACY_API_URL
+      const resolvedUrl = !cleanedUrl || LEGACY_API_URLS.includes(cleanedUrl)
         ? DEFAULT_API_URL
         : cleanedUrl;
       await SecureStore.setItemAsync('apiUrl', resolvedUrl);

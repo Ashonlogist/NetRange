@@ -27,7 +27,7 @@ Project **Settings -> API**:
 ## 3. Set the environment variables
 
 **On Render** (your backend host): Dashboard -> the web service running
-`netrange.onrender.com` -> Environment -> add:
+`netrange-dkb6.onrender.com` -> Environment -> add:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_KEY`
 
@@ -56,13 +56,13 @@ from the earlier triangulation change, and `python-dotenv` so a local
 
 Push to Render as usual (`render.yaml` already auto-deploys on push).
 Once the env vars are set and the tables exist, every device hitting
-`https://netrange.onrender.com` -- phones and your laptop browser alike --
+`https://netrange-dkb6.onrender.com` -- phones and your laptop browser alike --
 reads and writes the same shared dataset. No more disk wipes, no more "only
 I can see my scans."
 
 ## Verify the connection
 
-After deploying, request `https://netrange.onrender.com/api/health`. A healthy
+After deploying, request `https://netrange-dkb6.onrender.com/api/health`. A healthy
 service returns HTTP 200 with `{"status":"ok","database":"ok"}`. HTTP 503 means
 the backend is running but the Supabase URL, service key, network, or schema is
 not usable; check the Render deployment logs for the underlying exception.
