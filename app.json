@@ -2,7 +2,7 @@
   "expo": {
     "name": "NetRange",
     "slug": "netrange",
-    "version": "1.4.1",
+    "version": "1.4.2",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -22,7 +22,7 @@
       }
     },
     "android": {
-      "versionCode": 15,
+      "versionCode": 16,
       "adaptiveIcon": {
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#1a1a2e"
@@ -60,9 +60,9 @@
         "origin": false
       },
       "eas": {
-        "projectId": "19f21a90-6050-49ee-aa20-567251aba64a"
+        "projectId": "078c8184-d3a3-498f-99c8-c8938c13fec2"
       }
     },
-    "owner": "ashonlogy"
+    "owner": "ashonlogists-team"
   }
 }

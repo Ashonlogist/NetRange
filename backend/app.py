@@ -2,6 +2,8 @@ import os
 import math
 import csv
 import io
+import time
+import requests
 from datetime import datetime, timezone, timedelta
 from flask import Flask, render_template, request, jsonify, send_from_directory, Response, session
 from flask_cors import CORS
@@ -57,6 +59,146 @@ def api_version():
             "Settings: API URL hidden",
         ],
     })
+
+
+_GEOCODE_URL = "https://photon.komoot.io/api/"
+_GEOCODE_TTL = 900  # seconds; also keeps a single user off the provider's back
+_geocode_cache = {}
+
+# osm_key/osm_value -> a coarse kind, used by the client to pick a result icon
+_GEOCODE_KINDS = {
+    ("place", "city"): "city",
+    ("place", "town"): "town",
+    ("place", "village"): "village",
+    ("place", "suburb"): "suburb",
+    ("place", "neighbourhood"): "suburb",
+    ("place", "quarter"): "suburb",
+    ("place", "hamlet"): "village",
+    ("place", "county"): "region",
+    ("place", "state"): "region",
+    ("place", "island"): "region",
+    ("highway", "primary"): "street",
+    ("highway", "secondary"): "street",
+    ("highway", "tertiary"): "street",
+    ("highway", "residential"): "street",
+    ("highway", "unclassified"): "street",
+    ("highway", "service"): "street",
+    ("highway", "footway"): "path",
+    ("highway", "path"): "path",
+    ("highway", "track"): "path",
+    ("natural", "peak"): "peak",
+    ("natural", "volcano"): "peak",
+    ("natural", "water"): "water",
+    ("waterway", "river"): "water",
+    ("landuse", "reservoir"): "water",
+}
+
+
+def _geocode_label(props, kind):
+    """
+    Compose a readable one-line label. Street and postcode are only useful
+    for address-like results, so they are dropped for named places, which
+    otherwise read as "University of Ghana, Hospital Road, Accra".
+    """
+    parts = []
+    name = (props.get("name") or "").strip()
+    street = (props.get("street") or "").strip()
+    house = (props.get("housenumber") or "").strip()
+    city = (props.get("city") or props.get("district") or "").strip()
+    state = (props.get("state") or "").strip()
+    country = (props.get("country") or "").strip()
+    postcode = (props.get("postcode") or "").strip()
+
+    # A named POI reads better without its street ("University of Ghana,
+    # Hospital Road, Accra"); a bare address or a street has no name to
+    # lead with, so there the street is the whole point.
+    address_like = kind in ("street", "path") or not name
+
+    if name:
+        parts.append(name)
+    if address_like and street:
+        street_label = f"{house} {street}".strip()
+        if street_label.lower() not in {p.lower() for p in parts}:
+            parts.append(street_label)
+    if city and city.lower() not in {p.lower() for p in parts}:
+        parts.append(city)
+    for extra in (state, country):
+        if extra and extra.lower() not in {p.lower() for p in parts}:
+            parts.append(extra)
+
+    label = ", ".join(p for p in parts if p)
+    if address_like and postcode and postcode.lower() not in label.lower():
+        label = f"{label} {postcode}".strip()
+    return label or name or country or "Unnamed place"
+
+
+@app.route("/api/geocode")
+def api_geocode():
+    """
+    Forward geocoding for the map search box. Proxies Photon (keyless OSM)
+    because it sends no CORS headers, so the WebView cannot call it
+    directly. Results are cached briefly to respect the provider.
+    """
+    q = (request.args.get("q") or "").strip()
+    if len(q) < 3:
+        return jsonify({"results": []})
+
+    lat = request.args.get("lat", type=float)
+    lon = request.args.get("lon", type=float)
+
+    cache_key = (q.lower(), round(lat, 2) if lat is not None else None,
+                 round(lon, 2) if lon is not None else None)
+    cached = _geocode_cache.get(cache_key)
+    if cached and time.time() - cached[0] < _GEOCODE_TTL:
+        return jsonify({"results": cached[1], "cached": True})
+
+    params = {"q": q, "limit": 8, "lang": "en"}
+    # Bias toward the user so "legon" ranks the nearby one first
+    if lat is not None and lon is not None:
+        params["lat"] = lat
+        params["lon"] = lon
+
+    try:
+        resp = requests.get(_GEOCODE_URL, params=params, timeout=6, headers={
+            "User-Agent": "NetRange/1.4 (https://github.com/Ashonlogist/NetRange)",
+            "Accept": "application/json",
+        })
+        resp.raise_for_status()
+        features = resp.json().get("features") or []
+    except Exception:
+        app.logger.exception("Geocoding request failed for %r", q)
+        return jsonify({"results": [], "error": "geocoder unavailable"}), 502
+
+    results = []
+    seen = set()
+    for f in features:
+        props = f.get("properties") or {}
+        coords = (f.get("geometry") or {}).get("coordinates") or []
+        if len(coords) < 2:
+            continue
+        kind = _GEOCODE_KINDS.get(
+            (props.get("osm_key"), props.get("osm_value")), "place"
+        )
+        label = _geocode_label(props, kind)
+        # Photon returns the same place several times at different
+        # address/place levels; one pin per coordinate is what we want.
+        key = (round(coords[0], 4), round(coords[1], 4))
+        if key in seen:
+            continue
+        seen.add(key)
+        results.append({
+            "label": label,
+            "lat": coords[1],
+            "lon": coords[0],
+            "kind": kind,
+            "type": props.get("type") or "",
+            "country": props.get("country") or "",
+        })
+
+    if len(_geocode_cache) > 500:
+        _geocode_cache.clear()
+    _geocode_cache[cache_key] = (time.time(), results)
+    return jsonify({"results": results, "cached": False})
 
 
 @app.route("/api/health")
