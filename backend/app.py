@@ -5,7 +5,7 @@ import io
 import time
 import requests
 from datetime import datetime, timezone, timedelta
-from flask import Flask, render_template, request, jsonify, send_from_directory, Response, session
+from flask import Flask, render_template, request, jsonify, send_from_directory, redirect, abort, Response, session
 from flask_cors import CORS
 from scanner import scan, get_current_connection
 from db import save_scan, load_scans, get_client
@@ -24,7 +24,7 @@ DASHBOARD_SECRET = os.environ.get("DASHBOARD_SECRET", "nr-secret-2026-analytics-
 DASHBOARD_PASS = os.environ.get("DASHBOARD_PASSWORD", "netrange2026")
 app.secret_key = DASHBOARD_SECRET
 
-APP_VERSION = "1.4.1"
+APP_VERSION = "1.4.2"
 # The APK is published as a GitHub release asset, not served from this
 # service: the build output is gitignored, so a git-deployed instance can
 # never have it on disk. Override with APK_URL if hosting ever changes.
@@ -45,7 +45,16 @@ def map_view():
 
 @app.route("/download/<filename>")
 def download_file(filename):
-    return send_from_directory(os.path.join(os.path.dirname(__file__), "static"), filename, as_attachment=True)
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    candidate = os.path.join(static_dir, filename)
+    if os.path.isfile(candidate):
+        return send_from_directory(static_dir, filename, as_attachment=True)
+    # The APK is not committed (see .gitignore), so a git-deployed instance
+    # never has it on disk. Serve the published release instead of 404ing,
+    # which keeps APK_URL as the single override point for hosting.
+    if filename == "netrange.apk":
+        return redirect(APK_URL, code=302)
+    abort(404)
 
 
 @app.route("/api/version")
