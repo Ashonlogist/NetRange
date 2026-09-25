@@ -13,6 +13,7 @@ from algorithm import delaunay_interpolate, generate_contours, mesh_geojson
 from analytics import (aggregate_coverage_cells, carrier_comparison,
                         daily_quality_trend, weak_zones, data_quality_summary)
 import analytics
+import insights
 from geocoding import reverse_geocode_cells
 from api_keys import require_api_key
 
@@ -526,6 +527,26 @@ def api_analytics():
         "locations": locations[:2000],
         "daily": dict(sorted(daily.items())),
     })
+
+
+@app.route("/api/insights")
+def api_insights():
+    """
+    Diagnostic analysis for the owner-facing dashboard.
+
+    This is deliberately separate from /api/analytics/product: that one is the
+    public, k-anonymous publication layer, while this one states plainly what
+    the raw data can and cannot support. It is auth-gated because the reasoning
+    behind a suppression rule is itself sensitive.
+    """
+    auth = _check_dashboard_auth()
+    if auth:
+        return auth
+    scans = load_scans()
+    ssid_filter = request.args.get("ssid", "").strip().lower()
+    if ssid_filter:
+        scans = [s for s in scans if (s.get("ssid") or "").lower() == ssid_filter]
+    return jsonify(insights.build_insights(scans, ssid_filter))
 
 
 @app.route("/api/analytics/product")

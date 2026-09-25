@@ -26,273 +26,515 @@
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); }
-        .header { padding: 20px 32px; background: var(--glass); backdrop-filter: blur(24px); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+        .header { padding: 20px 32px; background: var(--glass); backdrop-filter: blur(24px); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
         .header h1 { font-size: 1.3em; background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .header .actions { display: flex; gap: 8px; }
+        .header .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
         .btn { padding: 8px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-family: inherit; font-size: 0.82em; font-weight: 600; cursor: pointer; text-decoration: none; transition: all 0.2s; }
         .btn:hover { background: rgba(255,255,255,0.08); border-color: var(--accent); }
-        .btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); border: none; color: #fff; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; padding: 24px 32px; }
-        .stat { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
-        .stat .label { font-size: 0.72em; font-weight: 500; color: var(--textM); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px; }
-        .stat .value { font-size: 1.8em; font-weight: 800; }
-        .stat .value.gradient { background: linear-gradient(135deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        .content { padding: 0 32px 32px; display: flex; flex-direction: column; gap: 20px; }
+        select.btn { padding: 8px 12px; }
+        .content { padding: 24px 32px 32px; display: flex; flex-direction: column; gap: 20px; }
+        .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
         .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
-        .card h2 { font-size: 0.85em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text2); margin-bottom: 16px; }
-        #map { height: 400px; border-radius: 12px; }
-        .row { display: flex; gap: 20px; }
-        .row > * { flex: 1; }
+        .card h2 { font-size: 0.85em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text2); margin-bottom: 4px; }
+        .card .sub { font-size: 0.78em; color: var(--textM); margin-bottom: 16px; }
+        .row { display: flex; gap: 20px; flex-wrap: wrap; }
+        .row > * { flex: 1; min-width: 340px; }
         table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
         th { text-align: left; padding: 8px 12px; color: var(--textM); font-weight: 500; border-bottom: 1px solid var(--border); }
         td { padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.03); }
+        td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+        #map { height: 400px; border-radius: 12px; }
+
+        /* A status pill is the main verb of this panel: every section is either
+           ok, blocked, or reporting a data problem. Never a blank. */
+        .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 0.7em; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; white-space: nowrap; }
+        .pill.ok { background: rgba(34,197,94,0.15); color: var(--green); }
+        .pill.insufficient { background: rgba(234,179,8,0.15); color: var(--yellow); }
+        .pill.unusable, .pill.critical { background: rgba(239,68,68,0.15); color: var(--red); }
+        .pill.unavailable { background: rgba(255,255,255,0.07); color: var(--textM); }
+        .pill.warning { background: rgba(249,115,22,0.15); color: var(--orange); }
+        .pill.info { background: rgba(6,182,212,0.15); color: var(--accent2); }
+        .pill.placeholder { background: rgba(239,68,68,0.15); color: var(--red); }
+
+        /* When an analysis is withheld, say so in place, with the reason. An
+           empty box reads as "nothing to report"; a box that says why is a
+           finding in its own right. */
+        .gate { border: 1px dashed rgba(255,255,255,0.14); border-radius: 10px; padding: 14px 16px; font-size: 0.84em; color: var(--text2); }
+        .gate .gate-title { font-weight: 600; color: var(--text); margin-bottom: 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .gate code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.94em; }
+        .need-have { font-size: 0.78em; color: var(--textM); margin-top: 8px; }
+
+        .finding { border-radius: 10px; padding: 14px 16px; border: 1px solid var(--border); border-left-width: 3px; background: rgba(255,255,255,0.03); }
+        .finding.critical { border-left-color: var(--red); }
+        .finding.warning { border-left-color: var(--orange); }
+        .finding.info { border-left-color: var(--accent2); }
+        .finding .f-title { font-weight: 600; font-size: 0.9em; margin-bottom: 5px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .finding .f-detail { font-size: 0.83em; color: var(--text2); }
+        .finding .f-action { font-size: 0.8em; color: var(--textM); margin-top: 7px; }
+        .finding .f-action::before { content: "\2192\00a0"; color: var(--accent2); }
+
+        .kpis { display: flex; flex-wrap: wrap; gap: 20px 28px; }
+        .kpi .k-label { font-size: 0.7em; font-weight: 500; color: var(--textM); text-transform: uppercase; letter-spacing: 0.04em; }
+        .kpi .k-value { font-size: 1.5em; font-weight: 800; font-variant-numeric: tabular-nums; }
+        .kpi .k-value.small { font-size: 1.05em; font-weight: 600; }
+
+        .hist { display: flex; align-items: flex-end; gap: 2px; height: 90px; margin-top: 14px; }
+        .hist .hb { flex: 1; background: linear-gradient(180deg, var(--accent), var(--accent2)); border-radius: 3px 3px 0 0; min-height: 2px; position: relative; }
+        .hist .hb.empty { background: rgba(255,255,255,0.05); }
+        .hist-axis { display: flex; justify-content: space-between; font-size: 0.72em; color: var(--textM); margin-top: 6px; font-variant-numeric: tabular-nums; }
+
         .bar-chart { display: flex; flex-direction: column; gap: 6px; }
         .bar-row { display: flex; align-items: center; gap: 10px; }
-        .bar-label { width: 120px; font-size: 0.82em; color: var(--text2); text-align: right; flex-shrink: 0; }
-        .bar-track { flex: 1; height: 24px; background: rgba(255,255,255,0.03); border-radius: 6px; overflow: hidden; position: relative; }
-        .bar-fill { height: 100%; border-radius: 6px; transition: width 0.5s; display: flex; align-items: center; padding-left: 8px; font-size: 0.72em; font-weight: 600; color: #fff; min-width: 30px; }
-        @media (max-width: 768px) { .row { flex-direction: column; } .grid { grid-template-columns: 1fr 1fr; } }
+        .bar-label { width: 96px; font-size: 0.82em; color: var(--text2); text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+        .bar-track { flex: 1; height: 24px; background: rgba(255,255,255,0.03); border-radius: 6px; overflow: hidden; }
+        .bar-fill { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 8px; font-size: 0.72em; font-weight: 600; color: #fff; min-width: 34px; }
+
+        .gate-list { display: flex; flex-direction: column; gap: 8px; }
+        .gate-item { display: flex; align-items: center; gap: 10px; font-size: 0.84em; }
+        .gate-item .gi-label { flex: 1; color: var(--text2); }
+        .gate-item .gi-nums { font-size: 0.92em; font-variant-numeric: tabular-nums; }
+        .gate-item.pass .gi-nums { color: var(--green); }
+        .gate-item.fail .gi-nums { color: var(--yellow); }
+
+        .layer-strip { display: flex; gap: 12px; flex-wrap: wrap; }
+        .layer-chip { border: 1px solid var(--border); border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; gap: 10px; flex: 1; min-width: 220px; background: rgba(255,255,255,0.03); }
+        .layer-chip .lc-name { font-weight: 600; font-size: 0.9em; }
+        .layer-chip .lc-why { font-size: 0.76em; color: var(--textM); }
+        .empty-note { font-size: 0.8em; color: var(--textM); }
+        @media (max-width: 768px) { .row > * { min-width: 0; } .content { padding: 16px; } .header { padding: 16px; } }
     </style>
 </head>
 <body>
     <div class="header">
         <h1>NetRange Analytics</h1>
         <div class="actions">
-            <a class="btn" href="/api/export?aggregate=true&format=csv">Export Coverage Data (CSV)</a>
-            <a class="btn" href="/api/export?aggregate=true&format=json">Export Coverage Data (JSON)</a>
+            <select class="btn" id="ssidFilter"><option value="">All networks</option></select>
+            <a class="btn" href="/api/export?aggregate=true&format=csv">Coverage Data (CSV)</a>
+            <a class="btn" href="/api/export?aggregate=true&format=json">Coverage Data (JSON)</a>
             <a class="btn" href="/api/export?format=csv" title="Includes device IDs and exact coordinates -- internal use only">Raw Export (internal)</a>
+            <a class="btn" href="/dashboard/logout">Sign out</a>
         </div>
     </div>
-
-    <div class="grid" id="stats"></div>
 
     <div class="content">
-        <div class="card">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
-                <h2 style="margin-bottom:0">Coverage Map</h2>
-                <select id="networkFilter" onchange="loadDashboard(this.value)" style="padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-family:inherit;font-size:0.85em">
-                    <option value="">All Networks</option>
-                </select>
-            </div>
-            <div id="map"></div>
+        <div id="loadError"></div>
+
+        <div class="card" id="layersCard" style="display:none">
+            <h2>What the map can honestly show</h2>
+            <div class="sub">A layer is only as good as the field behind it. A placeholder paints a confident picture of nothing.</div>
+            <div class="layer-strip" id="layers"></div>
         </div>
+
+        <div class="card" id="integrityCard" style="display:none">
+            <h2>Data integrity <span id="integrityCount"></span></h2>
+            <div class="sub">Checked before any summary below. These problems invalidate conclusions, so they are listed first.</div>
+            <div class="grid" id="integrity"></div>
+        </div>
+
+        <div class="card" id="sufficiencyCard" style="display:none">
+            <h2>What this dataset can support</h2>
+            <div class="sub">The gate each analysis must pass. Comparisons that fail a gate are withheld, not approximated.</div>
+            <div class="kpis" id="sufficiencyKpis" style="margin-bottom:18px"></div>
+            <div class="gate-list" id="sufficiency"></div>
+        </div>
+
         <div class="row">
-            <div class="card">
-                <h2>Network Comparison</h2>
-                <table>
-                    <thead><tr><th>Network</th><th>Avg Signal</th><th>Avg Speed</th><th>Samples</th><th>Devices</th></tr></thead>
-                    <tbody id="carrierTable"></tbody>
-                </table>
-            </div>
-            <div class="card">
-                <h2>Daily Quality Trend</h2>
-                <div id="dailyChart" class="bar-chart"></div>
-            </div>
+            <div class="card" id="distSpeedCard"></div>
+            <div class="card" id="distSignalCard"></div>
+            <div class="card" id="distAccuracyCard"></div>
         </div>
-        <div class="card">
-            <h2>Weak Coverage Zones <span style="font-weight:400;color:var(--textM);font-size:0.8em">(&le; -75 dBm, published areas only)</span></h2>
-            <table>
-                <thead><tr><th>Location</th><th>Avg Signal</th><th>Avg Speed</th><th>Samples</th><th>Devices</th></tr></thead>
-                <tbody id="weakZoneTable"></tbody>
-            </table>
+
+        <div class="row">
+            <div class="card" id="carriersCard"></div>
+            <div class="card" id="trendCard"></div>
         </div>
-        <div class="card">
-            <h2>Data Quality</h2>
-            <div id="qualitySummary" style="color:var(--text2);font-size:0.85em;line-height:1.8"></div>
+
+        <div class="row">
+            <div class="card" id="diurnalCard"></div>
+            <div class="card" id="weeklyCard"></div>
         </div>
+
+        <div class="card" id="cohortsCard" style="display:none">
+            <h2>Cohorts</h2>
+            <div class="sub" id="cohortsNote"></div>
+            <div class="grid" id="cohorts"></div>
+        </div>
+
         <div class="card">
-            <h2>Recent Scans <span style="font-weight:400;color:var(--textM);font-size:0.8em">(internal view -- not part of the exported product)</span></h2>
-            <table>
-                <thead><tr><th>SSID</th><th>Signal</th><th>Speed</th><th>Location</th><th>Source</th></tr></thead>
-                <tbody id="scanTable"></tbody>
-            </table>
+            <h2>Measured area</h2>
+            <div class="sub">Where the scans above were actually taken. Small clusters are individual places, not a network.</div>
+            <div id="map"></div>
         </div>
     </div>
 
-    <script>
-    var map, cellLayer, meshLayer, baseLayers, labelsLayer;
+<script>
+(function () {
+    'use strict';
 
-    function signalColor(dbm) {
-        if (dbm >= -50) return '#22c55e';
-        if (dbm >= -60) return '#06b6d4';
-        if (dbm >= -70) return '#eab308';
-        if (dbm >= -80) return '#f97316';
-        return '#ef4444';
-    }
+    var esc = function (s) {
+        return String(s === null || s === undefined ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    };
+    var num = function (v, d) {
+        if (v === null || v === undefined || v === '') return '&ndash;';
+        return typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(d === undefined ? 2 : d)) : esc(v);
+    };
+    var unitFor = function (metric) {
+        if (metric === 'download_speed_mbps') return ' Mbps';
+        if (metric === 'signal_dbm') return ' dBm';
+        if (metric === 'accuracy') return ' m';
+        return '';
+    };
+    // A p-value that underflows to exactly 0 must not be printed as "0", which
+    // reads like a broken calculation rather than a very small number.
+    var pText = function (p, digits) {
+        if (p === null || p === undefined) return '&ndash;';
+        if (p < 0.0001) return '&lt; 0.0001';
+        return num(p, digits === undefined ? 4 : digits);
+    };
 
-    function initMap() {
-        map = L.map('map').setView([6.5, -3.4], 12);
-        baseLayers = {
-            'Streets': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
-            }),
-            'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: '&copy; Esri', maxZoom: 19
-            }),
-            'Terrain': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-                attribution: '&copy; OpenTopoMap', maxZoom: 17
-            }),
-            'Dark': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; CartoDB', maxZoom: 19
-            }),
-        };
-        baseLayers['Streets'].addTo(map);
-        labelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; CartoDB', maxZoom: 19, pane: 'overlayPane'
-        });
-        L.control.layers(baseLayers, { 'Labels': labelsLayer }).addTo(map);
+    var metricName = function (m) {
+        return { download_speed_mbps: 'Download speed', signal_dbm: 'Signal strength',
+                 accuracy: 'Location accuracy' }[m] || m;
+    };
 
-        // Auto-enable labels on satellite/terrain, disable on streets/dark
-        map.on('baselayerchange', function(e) {
-            if (e.name === 'Satellite' || e.name === 'Terrain') {
-                if (!map.hasLayer(labelsLayer)) labelsLayer.addTo(map);
-            } else {
-                if (map.hasLayer(labelsLayer)) map.removeLayer(labelsLayer);
-            }
-        });
-        cellLayer = L.layerGroup().addTo(map);
-        meshLayer = L.layerGroup().addTo(map);
-    }
-
-    function renderCells(cells) {
-        cellLayer.clearLayers();
-        cells.forEach(function(c) {
-            var color = signalColor(c.signal_dbm_avg);
-            var radius = Math.max(6, Math.min(18, Math.sqrt(c.sample_count) * 3));
-            var popup = '<b>' + (c.location_name || c.dominant_network) + '</b><br>' + c.dominant_network + '<br>' + c.signal_dbm_avg + ' dBm avg' +
-                (c.speed_mbps_avg ? '<br>' + c.speed_mbps_avg + ' mb/s avg' : '') +
-                '<br>' + c.sample_count + ' samples from ' + c.device_count + ' devices' +
-                (c.confidence != null ? '<br>Confidence: ' + (c.confidence * 100).toFixed(0) + '%' : '');
-            L.circleMarker([c.lat, c.lon], {
-                radius: radius, color: color, fillColor: color,
-                fillOpacity: 0.6, weight: 1
-            }).bindPopup(popup).addTo(cellLayer);
-        });
-        if (cells.length > 0) {
-            var bounds = L.latLngBounds(cells.map(function(c) { return [c.lat, c.lon]; }));
-            map.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
+    // One renderer for every analysis. Whatever the verdict, the section shows
+    // either the result or the gate that withheld it -- never an empty box,
+    // and never a number the data does not support.
+    function renderVerdict(el, v, renderData) {
+        if (!el) return;
+        if (v.status === 'ok' && v.data) {
+            el.innerHTML = '<h2>' + esc(v.title) + '</h2>' +
+                '<div class="sub"><span class="pill ok">analysed</span> ' + esc(v.why || '') + '</div>' +
+                renderData(v.data);
+            return;
         }
-    }
-
-    function renderMesh(ssid) {
-        meshLayer.clearLayers();
-        var qs = ssid ? '?ssid=' + encodeURIComponent(ssid) : '';
-        fetch('/api/mesh' + qs).then(function(r) { return r.json(); }).then(function(data) {
-            if (!data.triangles || data.triangles.length === 0) return;
-            var allPts = [];
-            data.triangles.forEach(function(t) {
-                var lls = t.vertices.map(function(v) { return L.latLng(v.lat, v.lng); });
-                lls.forEach(function(ll) { allPts.push(ll); });
-                var dbm = t.avg_signal_dbm;
-                var color;
-                if (dbm >= -50) color = '#22c55e';
-                else if (dbm >= -60) color = '#06b6d4';
-                else if (dbm >= -70) color = '#eab308';
-                else if (dbm >= -80) color = '#f97316';
-                else color = '#ef4444';
-                L.polygon(lls, {
-                    color: color, fillColor: color,
-                    fillOpacity: 0.5, weight: 0, opacity: 0,
-                }).bindPopup(dbm.toFixed(1) + ' dBm' + (t.avg_download_speed_mbps ? '<br>' + t.avg_download_speed_mbps + ' mb/s' : '')).addTo(meshLayer);
+        var need = '', have = '';
+        try {
+            var pairs = [];
+            Object.keys(v.need || {}).forEach(function (k) {
+                pairs.push(k.replace(/_/g, ' ') + ' &ge; ' + esc(v.need[k]));
             });
-        }).catch(function() {});
+            Object.keys(v.have || {}).forEach(function (k) {
+                if (typeof v.have[k] !== 'object') pairs.push(k.replace(/_/g, ' ') + ': ' + esc(v.have[k]));
+            });
+            if (pairs.length) need = pairs.join(' &middot; ');
+        } catch (e) { /* a malformed need/have must not break the page */ }
+        el.innerHTML = '<h2>' + esc(v.title) + '</h2>' +
+            '<div class="sub"><span class="pill ' + esc(v.status) + '">' + esc(v.status) + '</span></div>' +
+            '<div class="gate"><div class="gate-title">Not reported</div>' +
+            '<div>' + esc(v.why || 'insufficient data') + '</div>' +
+            (need ? '<div class="need-have">' + need + '</div>' : '') + '</div>';
     }
 
-    async function loadDashboard(ssid) {
-        var qs = ssid ? '?ssid=' + encodeURIComponent(ssid) : '';
-        var resp = await fetch('/api/analytics');
-        var d = await resp.json();
-        var presp = await fetch('/api/analytics/product' + qs);
-        var p = await presp.json();
+    function histSvg(bins) {
+        if (!bins || !bins.length) return '';
+        var max = Math.max.apply(null, bins.map(function (b) { return b.count; })) || 1;
+        var bars = bins.map(function (b) {
+            var h = b.count ? Math.max(2, Math.round((b.count / max) * 86)) : 2;
+            return '<div class="hb' + (b.count ? '' : ' empty') + '" style="height:' + h + 'px" ' +
+                   'title="' + b.x0 + ' to ' + b.x1 + ': ' + b.count + '"></div>';
+        }).join('');
+        return '<div class="hist">' + bars + '</div><div class="hist-axis"><span>' +
+            num(bins[0].x0, 1) + '</span><span>' + num(bins[bins.length - 1].x1, 1) + '</span></div>';
+    }
 
-        var statsHtml = '';
-        statsHtml += '<div class="stat"><div class="label">Total Scans</div><div class="value gradient">' + d.total_scans + '</div></div>';
-        statsHtml += '<div class="stat"><div class="label">Distinct Devices</div><div class="value gradient">' + p.summary.total_distinct_devices + '</div></div>';
-        statsHtml += '<div class="stat"><div class="label">Published Areas</div><div class="value gradient">' + p.summary.published_cells + '</div></div>';
-        statsHtml += '<div class="stat"><div class="label">Avg Speed</div><div class="value gradient">' + (d.avg_speed_mbps || 'N/A') + ' mb/s</div></div>';
-        statsHtml += '<div class="stat"><div class="label">Weak Zones</div><div class="value gradient">' + p.weak_zones.length + '</div></div>';
-        document.getElementById('stats').innerHTML = statsHtml;
+    function renderDistribution(el, metric, v) {
+        if (!el) return;
+        if (v.status === 'ok' && v.data) {
+            var d = v.data.describe, u = unitFor(metric);
+            var ci = d.median_ci
+                ? '<div><span class="k-label">median 95% CI</span><div class="k-value small">' +
+                  num(d.median_ci.low) + ' to ' + num(d.median_ci.high) + esc(u) + '</div></div>'
+                : '<div><span class="k-label">median 95% CI</span>' +
+                  '<div class="k-value small" style="color:var(--textM)">withheld</div>' +
+                  '<div class="empty-note">' + esc(d.median_ci_withheld || '') + '</div></div>';
+            el.innerHTML = '<h2>' + esc(metricName(metric)) + ' distribution</h2>' +
+                '<div class="sub"><span class="pill ok">analysed</span> ' + esc(v.why) + '</div>' +
+                '<div class="kpis">' +
+                  '<div class="kpi"><div class="k-label">median</div><div class="k-value">' + num(d.median) + esc(u) + '</div></div>' +
+                  '<div class="kpi"><div class="k-label">mean</div><div class="k-value">' + num(d.mean) + esc(u) + '</div></div>' +
+                  ci +
+                  '<div class="kpi"><div class="k-label">range</div><div class="k-value small">' + num(d.min) + ' to ' + num(d.max) + esc(u) + '</div></div>' +
+                  '<div class="kpi"><div class="k-label">p25 / p75</div><div class="k-value small">' + num(d.p25) + ' / ' + num(d.p75) + '</div></div>' +
+                  '<div class="kpi"><div class="k-label">IQR outliers</div><div class="k-value">' + d.outlier_count + '</div></div>' +
+                '</div>' + histSvg(v.data.histogram) +
+                '<div class="empty-note" style="margin-top:10px">n = ' + d.n + ' readings' +
+                (d.stdev !== null ? ' &middot; sd ' + num(d.stdev) : '') + '</div>';
+            return;
+        }
+        var cls = v.status === 'unusable' ? 'unusable' : v.status;
+        el.innerHTML = '<h2>' + esc(metricName(metric)) + ' distribution</h2>' +
+            '<div class="sub"><span class="pill ' + esc(cls) + '">' + esc(v.status) + '</span></div>' +
+            '<div class="gate"><div class="gate-title">' +
+            (v.status === 'unusable' ? 'Withheld: the field is not real data' : 'Not reported') + '</div>' +
+            '<div>' + esc(v.why || '') + '</div></div>';
+    }
 
-        renderCells(p.cells);
-        renderMesh(ssid);
+    function renderBarList(rows, keyLabel, keyFmt, valLabel) {
+        if (!rows || !rows.length) return '';
+        var max = Math.max.apply(null, rows.map(function (r) { return r.median; })) || 1;
+        return '<div class="bar-chart">' + rows.map(function (r) {
+            var pct = Math.max(4, Math.round((r.median / max) * 100));
+            return '<div class="bar-row"><div class="bar-label">' + esc(keyFmt ? keyFmt(r) : r[keyLabel]) + '</div>' +
+                   '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:linear-gradient(90deg,var(--accent),var(--accent2))">' +
+                   num(r.median, 2) + esc(valLabel || '') + '</div></div></div>';
+        }).join('') + '</div>' +
+        '<div class="empty-note" style="margin-top:8px">bars show the median per bucket, not the mean: a handful of fast scans should not redefine the bucket</div>';
+    }
 
-        var carrierHtml = '';
-        p.carriers.forEach(function(c) {
-            carrierHtml += '<tr><td>' + c.network + '</td><td>' + c.avg_signal_dbm + ' dBm</td><td>' +
-                (c.avg_speed_mbps || '-') + ' mb/s</td><td>' + c.sample_count + '</td><td>' + c.device_count + '</td></tr>';
-        });
-        document.getElementById('carrierTable').innerHTML = carrierHtml || '<tr><td colspan="5" style="color:var(--textM)">Not enough distinct devices yet</td></tr>';
-
-        var dailyKeys = p.daily_trend.slice(-14);
-        var maxAbsSignal = Math.max.apply(null, dailyKeys.map(function(r) { return Math.abs(r.avg_signal_dbm); })) || 1;
-        var dhtml = '';
-        dailyKeys.forEach(function(r) {
-            var pct = (Math.abs(r.avg_signal_dbm) / maxAbsSignal * 100).toFixed(0);
-            var color = signalColor(r.avg_signal_dbm);
-            dhtml += '<div class="bar-row"><div class="bar-label">' + r.date.slice(5) + '</div><div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + color + '">' + r.avg_signal_dbm + ' dBm</div></div></div>';
-        });
-        document.getElementById('dailyChart').innerHTML = dhtml || '<div style="color:var(--textM);font-size:0.85em">No trend data yet</div>';
-
-        var weakHtml = '';
-        p.weak_zones.forEach(function(z) {
-            weakHtml += '<tr><td>' + (z.location_name || z.lat.toFixed(4) + ', ' + z.lon.toFixed(4)) + '</td><td>' + z.signal_dbm_avg + ' dBm</td><td>' +
-                (z.speed_mbps_avg || '-') + ' mb/s</td><td>' + z.sample_count + '</td><td>' + z.device_count + '</td></tr>';
-        });
-        document.getElementById('weakZoneTable').innerHTML = weakHtml || '<tr><td colspan="5" style="color:var(--textM)">No weak zones found</td></tr>';
-
-        var q = p.summary;
-        document.getElementById('qualitySummary').innerHTML =
-            'Date range: ' + (q.date_range.earliest ? q.date_range.earliest.slice(0,10) : '-') + ' to ' + (q.date_range.latest ? q.date_range.latest.slice(0,10) : '-') + '<br>' +
-            q.total_distinct_devices + ' distinct devices have contributed data<br>' +
-            q.published_cells + ' areas meet the minimum-device threshold to be published<br>' +
-            '<span style="color:var(--textM)">Areas with fewer than 3 distinct devices are withheld.</span>';
-
-        var tbody = '';
-        d.locations.slice(0, 50).forEach(function(loc) {
-            tbody += '<tr><td>' + (loc.ssid || '?') + '</td><td>' + (loc.signal_dbm || '?') + ' dBm</td><td>' + (loc.speed || '-') + ' mb/s</td><td>' + loc.lat.toFixed(4) + ', ' + loc.lon.toFixed(4) + '</td><td>mobile</td></tr>';
-        });
-        document.getElementById('scanTable').innerHTML = tbody;
-
-        // Populate network filter dropdown from raw scan data (all networks, not just published ones)
-        var sel = document.getElementById('networkFilter');
-        if (sel.options.length <= 1) {
-            var nets = Object.keys(d.carriers).sort(function(a,b) { return d.carriers[b] - d.carriers[a]; });
-            nets.forEach(function(name) {
-                if (!name || name === 'Unknown') return;
-                var opt = document.createElement('option');
-                opt.value = name;
-                opt.textContent = name + ' (' + d.carriers[name] + ')';
-                sel.appendChild(opt);
+    var map = null, markerLayer = null;
+    function initMap(points) {
+        if (map) return;
+        map = L.map('map', { zoomControl: true }).setView([5.58, -0.24], 14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            { attribution: '&copy; OpenStreetMap', maxZoom: 19 }).addTo(map);
+        markerLayer = L.layerGroup().addTo(map);
+        if (points && points.length) {
+            var bounds = L.latLngBounds(points.map(function (p) { return [p.lat, p.lon]; }));
+            map.fitBounds(bounds.pad(0.25));
+            points.forEach(function (p) {
+                L.circleMarker([p.lat, p.lon], {
+                    radius: 5, color: '#06b6d4', weight: 1,
+                    fillColor: '#7c3aed', fillOpacity: 0.8
+                }).bindPopup('<b>Speed</b>: ' + (p.speed === null || p.speed === undefined ? 'no reading' : num(p.speed) + ' Mbps') +
+                             '<br><b>Network</b>: ' + esc(p.ssid || 'unknown')).addTo(markerLayer);
             });
         }
     }
 
-    initMap();
-    loadDashboard('');
+    function render(d) {
+        // Layers: the headline product question.
+        if (d.layers) {
+            document.getElementById('layersCard').style.display = '';
+            document.getElementById('layers').innerHTML = Object.keys(d.layers.layers)
+                .map(function (k) {
+                    var L2 = d.layers.layers[k];
+                    return '<div class="layer-chip"><div><div class="lc-name">' + esc(L2.label) +
+                           ' <span class="pill ' + esc(L2.status) + '">' + esc(L2.status) + '</span></div>' +
+                           '<div class="lc-why">' + esc(L2.why) + '</div></div></div>';
+                }).join('');
+        }
 
-    // Auto-refresh every 60 seconds
-    setInterval(function() {
-        var ssid = document.getElementById('networkFilter').value;
-        loadDashboard(ssid);
-    }, 60000);
+        // Integrity: sorted critical-first so the worst problem leads. Shown
+        // even when clean -- a section that silently disappears when there is
+        // nothing to report is indistinguishable from one that failed to load.
+        var f = (d.integrity && d.integrity.findings) || [];
+        var order = { critical: 0, warning: 1, info: 2 };
+        f.sort(function (a, b) { return order[a.severity] - order[b.severity]; });
+        document.getElementById('integrityCard').style.display = '';
+        document.getElementById('integrityCount').innerHTML =
+            '<span class="pill ' + (d.integrity.clean ? 'ok' : 'warning') + '">' +
+            (d.integrity.clean ? 'clean' : f.length + ' finding' + (f.length > 1 ? 's' : '')) + '</span>';
+        document.getElementById('integrity').innerHTML = f.length ? f.map(function (x) {
+            return '<div class="finding ' + esc(x.severity) + '"><div class="f-title">' +
+                '<span class="pill ' + esc(x.severity) + '">' + esc(x.severity) + '</span>' +
+                esc(x.title) + '</div><div class="f-detail">' + esc(x.detail) + '</div>' +
+                (x.action ? '<div class="f-action">' + esc(x.action) + '</div>' : '') + '</div>';
+        }).join('') :
+            '<div class="gate"><div class="gate-title"><span class="pill ok">clean</span>' +
+            'No integrity problems found</div><div>Every measurement field varies, is numeric, and the ' +
+            'dataset is recent enough to describe. The sections below are still limited by the sample ' +
+            'size and device gates listed underneath.</div></div>';
 
-    // Session timeout: 30 minutes of inactivity -> force re-login
-    var SESSION_TIMEOUT_MS = 30 * 60 * 1000;
-    var lastActivity = Date.now();
-    var sessionTimer = setTimeout(logout, SESSION_TIMEOUT_MS);
+        // Sufficiency: the gates, with pass/fail per gate.
+        var s = d.sufficiency || {};
+        if (s.checks) {
+            document.getElementById('sufficiencyCard').style.display = '';
+            document.getElementById('sufficiencyKpis').innerHTML =
+                kpi('scans', s.total_scans) + kpi('devices', s.distinct_devices) +
+                kpi('carriers', s.distinct_carriers) + kpi('days', s.distinct_days) +
+                kpi('hours covered', s.hours_observed) +
+                kpi('newest scan', s.newest_age_days === null ? 'n/a' : s.newest_age_days + ' d old');
+            document.getElementById('sufficiency').innerHTML = (s.checks || []).map(function (c) {
+                return '<div class="gate-item ' + (c.ok ? 'pass' : 'fail') + '">' +
+                    '<span class="pill ' + (c.ok ? 'ok' : 'insufficient') + '">' + (c.ok ? 'pass' : 'blocked') + '</span>' +
+                    '<span class="gi-label">' + esc(c.label) + '</span>' +
+                    '<span class="gi-nums">' + esc(c.have) + ' / ' + esc(c.need) + '</span></div>';
+            }).join('') +
+            (s.ready_for && s.ready_for.length ?
+                '<div class="empty-note" style="margin-top:14px">supported: ' + esc(s.ready_for.join(', ')) + '</div>' : '') +
+            (s.blocked_for && s.blocked_for.length ?
+                '<div class="empty-note">not supported yet: ' + esc(s.blocked_for.join(', ')) + '</div>' : '');
+        }
 
-    function resetTimer() {
-        lastActivity = Date.now();
-        clearTimeout(sessionTimer);
-        sessionTimer = setTimeout(logout, SESSION_TIMEOUT_MS);
+        var dist = d.distributions || {};
+        renderDistribution(document.getElementById('distSpeedCard'), 'download_speed_mbps', dist.download_speed_mbps || { status: 'unavailable', why: 'not reported' });
+        renderDistribution(document.getElementById('distSignalCard'), 'signal_dbm', dist.signal_dbm || { status: 'unavailable', why: 'not reported' });
+        renderDistribution(document.getElementById('distAccuracyCard'), 'accuracy', dist.accuracy || { status: 'unavailable', why: 'not reported' });
+
+        // Carriers
+        var c = d.carriers || {};
+        if (c.status === 'ok' && c.data) {
+            var tests = {};
+            (c.data.pairwise_speed_tests || []).forEach(function (t) {
+                tests[t.a + '|' + t.b] = t;
+            });
+            // A pairwise test names both carriers, so look it up in either
+            // direction; otherwise one carrier silently loses its comparison.
+            var pairFor = function (name, all) {
+                for (var i = 0; i < all.length; i++) {
+                    if (all[i] === name) continue;
+                    var t = tests[name + '|' + all[i]] || tests[all[i] + '|' + name];
+                    if (t) return t;
+                }
+                return null;
+            };
+            var names = c.data.carriers.map(function (r) { return r.carrier; });
+            document.getElementById('carriersCard').innerHTML = '<h2>Carrier comparison</h2>' +
+                '<div class="sub"><span class="pill ok">analysed</span> ' + esc(c.why) + '</div>' +
+                '<table><thead><tr><th>Network</th><th class="num">Devices</th><th class="num">Samples</th>' +
+                '<th class="num">Speed median</th><th class="num">Signal median</th><th>vs others</th></tr></thead><tbody>' +
+                c.data.carriers.map(function (r) {
+                    var t = pairFor(r.carrier, names);
+                    var d2 = t && t.cohens_d ? t.cohens_d.d : null;
+                    var sig = t ? !!t['significant_at_0.05'] : false;
+                    return '<tr><td>' + esc(r.carrier) + '</td><td class="num">' + r.devices + '</td>' +
+                        '<td class="num">' + r.samples + '</td>' +
+                        '<td class="num">' + (r.speed ? num(r.speed.median) : '&ndash;') + '</td>' +
+                        '<td class="num">' + (r.signal ? num(r.signal.median, 1) : '&ndash;') + '</td>' +
+                        '<td>' + (t ?
+                            '<span class="pill ' + (sig ? 'ok' : 'unavailable') + '">' +
+                            (sig ? 'significant' : 'no difference') + '</span> ' +
+                            '<span class="empty-note">p = ' + pText(t.p_value) +
+                            (d2 !== null ? ', d = ' + num(d2, 2) : '') + '</span>'
+                            : '<span class="empty-note">no pair to compare with</span>') + '</td></tr>';
+                }).join('') + '</tbody></table>' +
+                '<div class="empty-note" style="margin-top:10px">Welch t-test, so each network keeps its own ' +
+                'variance. d is the standardised difference. p &ge; 0.05 is reported as no difference.</div>';
+        } else {
+            renderVerdict(document.getElementById('carriersCard'), c, function () { return ''; });
+        }
+
+        // Trend
+        var t = d.trend || {};
+        renderVerdict(document.getElementById('trendCard'), t, function (data) {
+            var r = data.regression || {};
+            return '<div class="kpis">' +
+                '<div class="kpi"><div class="k-label">verdict</div><div class="k-value small">' + esc(data.verdict || '') + '</div></div>' +
+                (r.slope !== undefined && r.slope !== null ?
+                 '<div class="kpi"><div class="k-label">slope / day</div><div class="k-value">' + num(r.slope, 3) + '</div></div>' : '') +
+                (r.r_squared !== null && r.r_squared !== undefined ?
+                 '<div class="kpi"><div class="k-label">r&sup2;</div><div class="k-value">' + num(r.r_squared, 3) + '</div></div>' : '') +
+                (r.p_value !== null && r.p_value !== undefined ?
+                 '<div class="kpi"><div class="k-label">p</div><div class="k-value">' + pText(r.p_value) + '</div></div>' : '') +
+                '</div>' +
+                (r.slope_ci ? '<div class="empty-note" style="margin-top:10px">95% CI on the slope: ' +
+                    num(r.slope_ci[0], 3) + ' to ' + num(r.slope_ci[1], 3) + '</div>' : '') +
+                renderBarList(data.series, 'date', function (x) { return esc(x.date.slice(5)); }, ' Mbps');
+        });
+
+        // Diurnal / weekly
+        var di = d.diurnal || {};
+        renderVerdict(document.getElementById('diurnalCard'), di, function (data) {
+            return renderBarList(data.hours, 'hour', function (x) {
+                return String(x.hour).padStart(2, '0') + ':00'; }, ' Mbps') +
+                '<div class="empty-note" style="margin-top:8px">best ' +
+                esc(String(data.best_hour.hour).padStart(2, '0')) + ':00, worst ' +
+                esc(String(data.worst_hour.hour).padStart(2, '0')) + ':00, spread ' +
+                num(data.spread) + ' Mbps</div>';
+        });
+        var wk = d.weekly || {};
+        renderVerdict(document.getElementById('weeklyCard'), wk, function (data) {
+            return renderBarList(data.days, 'day', function (x) { return esc(x.day.slice(0, 3)); }, ' Mbps');
+        });
+
+        // Cohorts
+        var co = d.cohorts;
+        if (co) {
+            document.getElementById('cohortsCard').style.display = '';
+            document.getElementById('cohortsNote').textContent = co.note || '';
+            var tbl = function (title, rows, cols) {
+                if (!rows || !rows.length) return '<div class="empty-note">none</div>';
+                return '<div><div class="k-label" style="margin-bottom:8px">' + esc(title) + '</div><table><thead><tr>' +
+                    cols.map(function (c2) { return '<th class="' + (c2.num ? 'num' : '') + '">' + esc(c2.h) + '</th>'; }).join('') +
+                    '</tr></thead><tbody>' + rows.map(function (r) {
+                        return '<tr>' + cols.map(function (c2) {
+                            var v = c2.get(r);
+                            return '<td class="' + (c2.num ? 'num' : '') + '">' + v + '</td>';
+                        }).join('') + '</tr>';
+                    }).join('') + '</tbody></table></div>';
+            };
+            document.getElementById('cohorts').innerHTML =
+                tbl('By device', co.by_device, [
+                    { h: 'Device', get: function (r) { return esc(r.device); } },
+                    { h: 'Samples', num: 1, get: function (r) { return r.samples; } },
+                    { h: 'Days', num: 1, get: function (r) { return r.days; } },
+                    { h: 'Median', num: 1, get: function (r) { return r.median_speed === null ? '&ndash;' : num(r.median_speed); } }
+                ]) +
+                tbl('By network', co.by_carrier, [
+                    { h: 'Network', get: function (r) { return esc(r.carrier); } },
+                    { h: 'Devices', num: 1, get: function (r) { return r.devices; } },
+                    { h: 'Samples', num: 1, get: function (r) { return r.samples; } },
+                    { h: 'Median', num: 1, get: function (r) { return r.median_speed === null ? '&ndash;' : num(r.median_speed); } }
+                ]) +
+                tbl('By area (top 20, ~1km cells)', co.by_area, [
+                    { h: 'Cell', get: function (r) { return '<span class="mono">' + esc(r.area) + '</span>'; } },
+                    { h: 'Samples', num: 1, get: function (r) { return r.samples; } },
+                    { h: 'Median', num: 1, get: function (r) { return r.median_speed === null ? '&ndash;' : num(r.median_speed); } }
+                ]);
+        }
     }
-    ['mousemove','mousedown','keydown','touchstart','scroll'].forEach(function(evt) {
-        document.addEventListener(evt, resetTimer, { passive: true });
-    });
 
-    function logout() {
-        window.location.href = '/dashboard/logout';
+    // value may contain markup (e.g. a formatted p-value), so it is not escaped
+    function kpi(label, value) {
+        return '<div class="kpi"><div class="k-label">' + esc(label) + '</div><div class="k-value">' + value + '</div></div>';
     }
-    </script>
+
+    function loadError(msg) {
+        document.getElementById('loadError').innerHTML =
+            '<div class="finding critical"><div class="f-title"><span class="pill critical">error</span>Analysis failed to load</div>' +
+            '<div class="f-detail">' + esc(msg) + '</div></div>';
+    }
+
+    function populateFilter(list) {
+        var sel = document.getElementById('ssidFilter');
+        (list || []).forEach(function (s) {
+            if (!s) return;
+            var o = document.createElement('option');
+            o.value = s; o.textContent = s;
+            sel.appendChild(o);
+        });
+    }
+
+    var raw = [];
+    function refresh() {
+        var ssid = document.getElementById('ssidFilter').value;
+        var qs = ssid ? '?ssid=' + encodeURIComponent(ssid) : '';
+        fetch('/api/insights' + qs)
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
+            .then(render)
+            .catch(function (e) { loadError(e.message || String(e)); });
+    }
+
+    // Raw points for the map come from the existing aggregate endpoint, so the
+    // map keeps working independently of the analysis layer.
+    function loadMapPoints() {
+        var ssid = document.getElementById('ssidFilter').value;
+        var qs = ssid ? '?ssid=' + encodeURIComponent(ssid) : '';
+        fetch('/api/analytics' + qs)
+            .then(function (r) { return r.json(); })
+            .then(function (d) { initMap(d.locations || []); })
+            .catch(function () { initMap([]); });
+    }
+
+    fetch('/api/scans').then(function (r) { return r.json(); })
+        .then(function (d) {
+            var seen = {};
+            (d.scans || []).forEach(function (s) { if (s.ssid) seen[s.ssid] = 1; });
+            populateFilter(Object.keys(seen).sort());
+            document.getElementById('ssidFilter').addEventListener('change', function () {
+                refresh(); loadMapPoints();
+            });
+            refresh();
+            loadMapPoints();
+        })
+        .catch(function (e) { loadError(e.message || String(e)); });
+})();
+</script>
 </body>
 </html>
