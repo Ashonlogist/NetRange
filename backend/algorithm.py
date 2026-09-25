@@ -37,7 +37,9 @@ from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
 MIN_POINTS_FOR_MESH = 3
 DEFAULT_HALF_LIFE_SECONDS = 15 * 60  # a scan from 15 min ago counts half as much
 DEFAULT_MIN_ACCURACY_WEIGHT = 0.15   # even a bad GPS fix keeps some influence
-DEFAULT_MIN_RECENCY_WEIGHT = 1e-9    # floor so stale scans can't zero out an anchor
+DEFAULT_MIN_RECENCY_WEIGHT = 0.01    # floor so stale scans can't zero out an anchor
+STALE_AFTER_SECONDS = 60 * 60        # past an hour, freshness stops dominating
+STALE_HALF_LIFE_SECONDS = 3 * 24 * 60 * 60  # 3 days, so the newest old scan still wins
 DEFAULT_STAY_RADIUS_M = 12.0         # floor for "same spot" -- consumer GPS is rarely
                                       # genuinely better than this even when it claims to be,
                                       # especially indoors where accuracy is often optimistic
@@ -68,7 +70,17 @@ def _parse_timestamp(ts):
 
 
 def recency_weight(timestamp, now=None, half_life_seconds=DEFAULT_HALF_LIFE_SECONDS):
-    """1.0 for a point from right now, 0.5 after one half-life, etc."""
+    """1.0 for a point from right now, 0.5 after one half-life, etc.
+
+    Two regimes. Inside STALE_AFTER_SECONDS the short half-life decides, so a
+    reading from the last few minutes beats one from an hour ago. Past that
+    point freshness would otherwise decay to nothing and an abandoned patch
+    would report no coverage at all, so the decay switches to a multi-day
+    half-life: coverage keeps rendering from the most recent scan, and scans
+    from a quieter day still rank behind scans from a busier one. The floor
+    keeps 0.5 ** x from underflowing to exactly 0.0 past ~1074 half-lives,
+    which is what used to divide by zero when anchors merged.
+    """
     now = now if now is not None else time.time()
     ts = _parse_timestamp(timestamp)
     if ts is None:
@@ -76,10 +88,14 @@ def recency_weight(timestamp, now=None, half_life_seconds=DEFAULT_HALF_LIFE_SECO
     age = max(0.0, now - ts)
     if half_life_seconds <= 0:
         return 1.0
-    # 0.5 ** x underflows to exactly 0.0 once x passes ~1074, which at this
-    # half-life is only ~11 days. A zero weight drives w_sum to 0 and divides
-    # by zero when anchors merge, so keep a tiny positive floor.
-    return max(DEFAULT_MIN_RECENCY_WEIGHT, 0.5 ** (age / half_life_seconds))
+    if age <= STALE_AFTER_SECONDS:
+        w = 0.5 ** (age / half_life_seconds)
+    else:
+        # start the slow decay from wherever the fast one left off, so the
+        # curve stays continuous whatever half_life_seconds is
+        handover = 0.5 ** (STALE_AFTER_SECONDS / half_life_seconds)
+        w = handover * 0.5 ** ((age - STALE_AFTER_SECONDS) / STALE_HALF_LIFE_SECONDS)
+    return max(DEFAULT_MIN_RECENCY_WEIGHT, w)
 
 
 def accuracy_weight(accuracy, min_weight=DEFAULT_MIN_ACCURACY_WEIGHT):
