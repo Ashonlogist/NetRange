@@ -1,0 +1,7 @@
+{
+  "name": "netrange-telephony",
+  "version": "0.1.0",
+  "description": "Per-SIM carrier and signal readings for NetRange. Native-only; the JS side reaches it through NativeModules.NetRangeTelephony.",
+  "main": "index.js",
+  "private": true
+}
