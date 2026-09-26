@@ -14,5 +14,8 @@ node_modules/
 .env
 .vscode/
 .idea/
-android/
+# Anchored to the repo root on purpose. A bare `android/` also matches
+# modules/*/android/, which silently hid every Kotlin file of the local
+# telephony module -- the config committed, the module it points at did not.
+/android/
 backend/static/netrange.apk

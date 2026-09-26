@@ -1,0 +1,37 @@
+apply plugin: 'com.android.library'
+apply plugin: 'kotlin-android'
+
+group = 'expo.modules.telephony'
+version = '0.1.0'
+
+def expoModulesCorePlugin = new File(
+  project(":expo-modules-core").projectDir.absolutePath,
+  "ExpoModulesCorePlugin.gradle"
+)
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useExpoPublishing()
+
+android {
+  namespace "expo.modules.telephony"
+  compileSdkVersion safeExtGet("compileSdkVersion", 34)
+
+  defaultConfig {
+    // SignalStrength.cellSignalStrengths and
+    // TelephonyManager.createForSubscriptionId both need API 23; the app's own
+    // minSdk is higher, but pin it here so a future downgrade fails loudly at
+    // compile time instead of at runtime on a random handset.
+    minSdkVersion safeExtGet("minSdkVersion", 23)
+    targetSdkVersion safeExtGet("targetSdkVersion", 34)
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = "17"
+  }
+}

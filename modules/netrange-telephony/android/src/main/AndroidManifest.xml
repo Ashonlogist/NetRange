@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- Reading the carrier name and signal level per SIM is the whole point of
+       this module; without it every cellular scan is stored with a null
+       signal and can never be drawn on the coverage map. -->
+  <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+</manifest>
