@@ -145,7 +145,7 @@ app.secret_key = OWNER_SESSION_SECRET
 # reads it per request so the deadline passes without a redeploy. Do not cache
 # it at import time; two sources of truth for a security deadline is a trap.
 
-APP_VERSION = "1.5.1"
+APP_VERSION = "1.5.2"
 # The APK is published as a GitHub release asset, not served from this
 # service: the build output is gitignored, so a git-deployed instance can
 # never have it on disk. Override with APK_URL if hosting ever changes.
@@ -184,6 +184,11 @@ def download_file(filename):
 # heading. Keying them to the version makes that impossible: a new version with
 # no entry gets an honest fallback instead of a lie.
 RELEASE_NOTES = {
+    "1.5.2": [
+        "Update check: the app reports a distinct version, so a build you have actually installed is no longer mistaken for an outdated one",
+        "Dual-SIM: a phone whose default SIM is idle now scans on the SIM that actually has data",
+        "Per-SIM signal: carrier and signal level are read natively per line, so cellular scans no longer arrive with a blank signal",
+    ],
     "1.5.1": [
         "Phone permission: a real row that says whether it is granted, and a button that actually works",
         "Phone permission: if Android has blocked the prompt, it opens settings instead of doing nothing",
