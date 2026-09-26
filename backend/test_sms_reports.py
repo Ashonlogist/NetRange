@@ -723,3 +723,84 @@ class TestOfflineForwardGeocoding(unittest.TestCase):
         # A point in the KNUST rectangle still labels as whatever it did before,
         # i.e. the table is unchanged, not re-ordered around a new entry.
         self.assertEqual(geocoding.reverse_geocode(6.66, -1.60), "Kumasi Adum")
+
+
+class TestAttributionIsActuallyWiredUp(SmsFlowTests):
+    """
+    attribute_site() had its own passing unit tests the whole time, and was
+    still never once given a coordinate in production: the final step called it
+    with answers.get("lat"), the location was only geocoded afterwards inside
+    save_report, and answers never gained a lat key. So it returned None for
+    every report ever submitted and the whole feature was dark.
+
+    These tests drive the real flow end to end, because a unit test of the
+    matcher cannot catch the matcher never being called with its argument.
+    """
+
+    def _add_site(self, carrier="MTN", lat=5.6525, lon=-0.17, enabled=True):
+        self.fake.table("widget_sites").insert({
+            "id": 1, "owner_id": 1, "domain": "venue.test",
+            "sms_carrier": carrier, "lat": lat, "lon": lon,
+            "sms_reporting_enabled": enabled,
+        }).execute()
+
+    def _run_session(self, number, carrier, location, rating="9", frustration="8"):
+        """Send a whole session through the real handler."""
+        for step in (rating, carrier, location, "skip", frustration):
+            sms_reports.handle_inbound(number, step, client=self.fake)
+        reports = self.fake.rows("sms_reports")
+        self.assertEqual(len(reports), 1, "session did not complete")
+        return reports[0]
+
+    def test_a_report_at_a_registered_site_is_attributed(self):
+        self._add_site()
+        row = self._run_session("+233201234567", "MTN", "East Legon")
+        self.assertIsNotNone(row["widget_site_id"],
+                             "report at the site's own coordinates was not attributed")
+
+    def test_the_stored_coordinates_are_the_resolved_ones(self):
+        """The row has to carry the coordinates it was attributed by."""
+        self._add_site()
+        row = self._run_session("+233201234567", "MTN", "East Legon")
+        self.assertIsNotNone(row["lat"])
+        self.assertIsNotNone(row["lon"])
+
+    def test_a_report_elsewhere_is_not_attributed(self):
+        """A different part of the country must not land on this site."""
+        self._add_site()
+        row = self._run_session("+233201234567", "MTN", "Takoradi Market")
+        self.assertIsNone(row["widget_site_id"])
+
+    def test_a_different_carrier_is_not_attributed(self):
+        self._add_site(carrier="MTN")
+        row = self._run_session("+233201234567", "Vodafone", "East Legon")
+        self.assertIsNone(row["widget_site_id"])
+
+    def test_a_site_with_reporting_off_gets_nothing(self):
+        self._add_site(enabled=False)
+        row = self._run_session("+233201234567", "MTN", "East Legon")
+        self.assertIsNone(row["widget_site_id"])
+
+    def test_an_unplaceable_report_is_saved_but_unattributed(self):
+        """Losing the location must not lose the report -- it still carries
+        carrier and frustration for the general aggregate."""
+        self._add_site()
+        row = self._run_session("+233201234567", "MTN", "Somewhere Nonsense")
+        self.assertIsNone(row["widget_site_id"])
+        self.assertEqual(row["carrier"], "MTN")
+        self.assertIsNone(row["lat"])
+
+    def test_the_geocoder_runs_once_per_report(self):
+        """
+        With an operator-configured third-party geocoder, resolving twice would
+        send the same person's location to that third party twice.
+        """
+        self._add_site()
+        calls = []
+        original = sms_reports.geocode_free_text
+        sms_reports.geocode_free_text = lambda t: (calls.append(t), original(t))[1]
+        try:
+            self._run_session("+233201234567", "MTN", "East Legon")
+        finally:
+            sms_reports.geocode_free_text = original
+        self.assertEqual(len(calls), 1, f"geocoded {len(calls)} times for one report")

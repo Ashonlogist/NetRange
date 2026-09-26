@@ -298,8 +298,15 @@ def handle_inbound(number: str, text: str, client=None) -> str:
         }).eq("phone_hash", phash).execute()
         return PROMPTS[nxt]
 
-    site_id = attribute_site(client, answers.get("carrier"),
-                             answers.get("lat"), answers.get("lon"))
+    # Resolve the location BEFORE attributing, and keep the result on answers.
+    # save_report used to geocode for itself, after attribution had already run
+    # -- so attribute_site was handed answers.get("lat"), which was never set,
+    # and returned None for every report ever submitted. The function was
+    # correct; it was simply never given the coordinates to work with.
+    lat, lon = geocode_free_text(answers.get("location_text") or "")
+    answers["lat"], answers["lon"] = lat, lon
+
+    site_id = attribute_site(client, answers.get("carrier"), lat, lon)
     client.table("sms_sessions").delete().eq("phone_hash", phash).execute()
     save_report(client, phash, answers, site_id)
     return (
@@ -399,7 +406,12 @@ def geocode_free_text(text: str) -> tuple[float | None, float | None]:
 
 
 def save_report(client, phash: str, answers: dict, site_id) -> dict:
-    lat, lon = geocode_free_text(answers.get("location_text") or "")
+    # Prefer what the caller already resolved. Geocoding twice would be
+    # wasteful at best and, with an operator-configured third-party geocoder,
+    # would send the same person's location to that third party twice.
+    lat, lon = answers.get("lat"), answers.get("lon")
+    if lat is None or lon is None:
+        lat, lon = geocode_free_text(answers.get("location_text") or "")
     row = {
         "widget_site_id": site_id,
         "phone_hash": phash,
