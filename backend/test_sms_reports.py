@@ -1,0 +1,423 @@
+"""
+Tests for SMS coverage reports (backend/sms_reports.py).
+
+These exist because SMS reporting is the most privacy-sensitive thing in this
+repository: it asks a real person to describe their experience at a real place,
+then asks for their gender and how frustrated they are. The tests below pin the
+behaviours that keep that safe, not just the happy path:
+
+  * the raw phone number is never stored anywhere;
+  * gender is skippable and stays NULL when skipped;
+  * an unparseable answer re-asks instead of being silently dropped;
+  * incomplete sessions expire rather than being resumed days later;
+  * k-anonymity suppression is genuinely applied, and there is no code path
+    that publishes a small-n cell.
+
+They run against an in-memory stub that HONOURS .eq()/.in_/.lt()/.update()
+filters. A stub that ignored filters would let every one of these pass for the
+wrong reason, which is the trap test_device_auth.py already documents.
+"""
+
+import unittest
+from datetime import datetime, timedelta, timezone
+
+import tests_env  # noqa: F401  (must precede `import app`)
+
+import app as appmod  # noqa: E402
+import db  # noqa: E402
+import owner_auth  # noqa: E402
+import sms_reports  # noqa: E402
+from analytics import MIN_DEVICES_PER_CELL  # noqa: E402
+
+
+class _Table:
+    """Minimal query builder over one in-memory table."""
+
+    def __init__(self, store):
+        self.store = store
+        self.op = "select"
+        self.payload = None
+        self.filters = []
+
+    def select(self, *a, **k):
+        self.op = "select"
+        return self
+
+    def eq(self, col, val):
+        self.filters.append((col, val))
+        return self
+
+    def in_(self, col, vals):
+        self.filters.append((col, list(vals)))
+        return self
+
+    def lt(self, col, val):
+        self.filters.append((col, ("<", val)))
+        return self
+
+    def order(self, *a, **k):
+        return self
+
+    def limit(self, *a, **k):
+        return self
+
+    def insert(self, row):
+        self.op = "insert"
+        self.payload = row
+        return self
+
+    def update(self, patch):
+        self.op = "update"
+        self.payload = patch
+        return self
+
+    def delete(self):
+        self.op = "delete"
+        return self
+
+    def _match(self, row):
+        for col, expected in self.filters:
+            if isinstance(expected, tuple) and expected[0] == "<":
+                actual = row.get(col)
+                if actual is None or actual >= expected[1]:
+                    return False
+            elif isinstance(expected, list):
+                if row.get(col) not in expected:
+                    return False
+            elif row.get(col) != expected:
+                return False
+        return True
+
+    def _next_id(self):
+        ids = [r.get("id", 0) for r in self.store if isinstance(r.get("id", 0), int)]
+        return (max(ids) + 1) if ids else 1
+
+    def execute(self):
+        if self.op == "insert":
+            # supabase-py accepts either a single row dict or a list of rows
+            # (db.save_scan batches), so the stub has to as well.
+            incoming = self.payload
+            if isinstance(incoming, dict):
+                incoming = [incoming]
+            data = []
+            for item in incoming:
+                row = dict(item)
+                row.setdefault("id", self._next_id())
+                self.store.append(row)
+                data.append(row)
+        elif self.op == "delete":
+            victims = [r for r in self.store if self._match(r)]
+            for v in victims:
+                self.store.remove(v)
+            data = victims
+        elif self.op == "update":
+            data = [r for r in self.store if self._match(r)]
+            for row in data:
+                row.update(self.payload)
+        else:
+            data = [r for r in self.store if self._match(r)]
+        resp = type("R", (), {"data": data})()
+        return resp
+
+
+class _Db:
+    """Per-table stores, so ids do not collide across tables."""
+
+    def __init__(self):
+        self.tables = {}
+
+    def table(self, name):
+        return _Table(self.tables.setdefault(name, []))
+
+    def rows(self, name):
+        return self.tables.get(name, [])
+
+
+def _iso(dt):
+    return dt.isoformat()
+
+
+class SmsFlowTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = _Db()
+        db._client = self.fake
+        appmod.get_client = lambda: self.fake
+        owner_auth.OWNER_SESSION_SECRET = "test-owner-session-secret"
+        owner_auth.SMS_PHONE_PEPPER = "test-phone-pepper"
+        self.n = "+233201234567"
+        self.send = lambda text: sms_reports.handle_inbound(self.n, text, client=self.fake)
+
+    # --- the happy path, all five steps ----------------------------------
+
+    def test_full_report_is_recorded(self):
+        self.assertIn("1", self.send(""))          # opens the conversation
+        self.send("7")                              # quality
+        self.send("MTN")                            # carrier
+        self.send("Kanda")                          # location
+        self.send("f")                              # gender
+        reply = self.send("9")                      # frustration -> completes
+
+        reports = self.fake.rows("sms_reports")
+        self.assertEqual(len(reports), 1, "expected exactly one completed report")
+        r = reports[0]
+        self.assertEqual(r["quality_rating"], 7)
+        self.assertEqual(r["carrier"], "MTN")
+        self.assertEqual(r["location_text"], "Kanda")
+        self.assertEqual(r["gender"], "f")
+        self.assertEqual(r["frustration"], 9)
+        self.assertIn("recorded", reply)
+
+    def test_session_is_cleared_after_completion(self):
+        self.send("")
+        for t in ("5", "Telecel", "Osu", "skip", "3"):
+            self.send(t)
+        self.assertEqual(len(self.fake.rows("sms_sessions")), 0)
+
+    # --- phone number privacy -------------------------------------------
+
+    def test_raw_number_is_never_stored(self):
+        self.send("")
+        for t in ("6", "AirtelTigo", "Labon", "m", "2"):
+            self.send(t)
+        blob = repr(self.fake.tables)
+        self.assertNotIn("233201234567", blob,
+                         "raw phone number must not appear in any stored row")
+
+    def test_stored_identifier_is_a_keyed_hash(self):
+        ph = owner_auth.hash_phone(self.n)
+        self.assertNotIn("233201234567", ph)
+        self.assertEqual(len(ph), 64, "hex sha256")
+        # Keyed, so an attacker with the row cannot reproduce it without the
+        # pepper -- unlike a bare sha256 of a ~10^8-value number space.
+        self.assertNotEqual(ph, owner_auth.hash_phone(self.n).upper())
+
+    def test_different_pepper_yields_different_hash(self):
+        original = owner_auth.SMS_PHONE_PEPPER
+        try:
+            owner_auth.SMS_PHONE_PEPPER = "a-different-pepper"
+            other = owner_auth.hash_phone(self.n)
+        finally:
+            owner_auth.SMS_PHONE_PEPPER = original
+        self.assertNotEqual(other, owner_auth.hash_phone(self.n))
+
+    # --- gender is genuinely optional -----------------------------------
+
+    def test_skip_keyword_leaves_gender_null(self):
+        self.send("")
+        for t in ("8", "MTN", "Kanda", "skip", "10"):
+            self.send(t)
+        r = self.fake.rows("sms_reports")[0]
+        self.assertIsNone(r["gender"], "'skip' must store NULL, not a guess")
+        self.assertEqual(r["frustration"], 10, "skip must not end the report early")
+
+    def test_unrecognised_gender_stores_null_and_continues(self):
+        self.send("")
+        for t in ("8", "MTN", "Kanda", "purple", "4"):
+            self.send(t)
+        r = self.fake.rows("sms_reports")[0]
+        self.assertIsNone(r["gender"], "never infer gender from an unknown reply")
+        self.assertEqual(r["frustration"], 4)
+
+    def test_gender_prompt_states_it_is_optional(self):
+        self.assertIn("skip", sms_reports.PROMPTS["gender"])
+
+    # --- bad input re-asks ----------------------------------------------
+
+    def test_unparseable_rating_asks_again_and_keeps_the_step(self):
+        self.send("")
+        reply = self.send("excellent")
+        self.assertIn("1", reply)
+        self.assertEqual(len(self.fake.rows("sms_sessions")), 1)
+        sess = self.fake.rows("sms_sessions")[0]
+        self.assertEqual(sess["current_step"], "quality", "must not advance on garbage")
+        self.assertEqual(sess["answers"], {})
+
+    def test_out_of_range_ratings_rejected(self):
+        for bad in ("0", "11", "-3"):
+            self.assertIsNone(sms_reports.parse_rating(bad), bad)
+
+    def test_ten_is_accepted(self):
+        self.assertEqual(sms_reports.parse_rating("10"), 10)
+
+    # --- timeout --------------------------------------------------------
+
+    def test_incomplete_session_is_purged_after_the_timeout(self):
+        self.send("")
+        self.send("7")
+        rows = self.fake.rows("sms_sessions")
+        self.assertEqual(len(rows), 1)
+        # Backdate well past the 30-minute window.
+        rows[0]["last_activity_at"] = _iso(
+            datetime.now(timezone.utc) - timedelta(minutes=sms_reports.SESSION_TIMEOUT_MINUTES + 5)
+        )
+        self.send("MTN")
+        # The old partial answers must be gone, not resumed.
+        self.assertEqual(self.fake.rows("sms_reports"), [])
+        sess = self.fake.rows("sms_sessions")[0]
+        self.assertEqual(sess["current_step"], "quality", "a stale session must restart")
+
+    def test_session_within_the_window_is_resumed(self):
+        self.send("")
+        self.send("7")
+        sess = self.fake.rows("sms_sessions")[0]
+        sess["last_activity_at"] = _iso(
+            datetime.now(timezone.utc) - timedelta(minutes=5)
+        )
+        reply = self.send("MTN")
+        self.assertEqual(self.fake.rows("sms_sessions")[0]["current_step"], "location")
+        self.assertIn("Where", reply)
+
+    def test_cancel_discards_partial_answers(self):
+        self.send("")
+        self.send("7")
+        self.send("cancel")
+        self.assertEqual(len(self.fake.rows("sms_sessions")), 0)
+        self.assertEqual(len(self.fake.rows("sms_reports")), 0)
+
+    def test_start_restarts_an_in_progress_report(self):
+        self.send("")
+        self.send("7")
+        self.send("START")
+        self.assertEqual(self.fake.rows("sms_sessions")[0]["current_step"], "quality")
+        self.assertEqual(self.fake.rows("sms_sessions")[0]["answers"], {})
+
+    # --- inbound parsing -------------------------------------------------
+
+    def test_parse_inbound_accepts_common_field_spellings(self):
+        for key in ("from", "From", "msisdn", "phone"):
+            num, _to, _txt = sms_reports.parse_inbound({key: "+233201234567", "text": "hi"})
+            self.assertEqual(num, "+233201234567", key)
+
+    def test_parse_inbound_reports_no_sender(self):
+        num, _to, _txt = sms_reports.parse_inbound({"text": "hi"})
+        self.assertIsNone(num)
+
+    def test_blank_message_reprompts_rather_than_storing_junk(self):
+        self.send("")
+        self.send("   ")
+        self.assertEqual(self.fake.rows("sms_reports"), [])
+
+
+class SmsAttributionTests(unittest.TestCase):
+    def setUp(self):
+        self.fake = _Db()
+        owner_auth.SMS_PHONE_PEPPER = "test-phone-pepper"
+        self.fake.table("widget_sites").insert(
+            {"id": 1, "domain": "volta.example.com", "label": "Volta Hall",
+             "sms_reporting_enabled": True, "sms_carrier": "MTN"}
+        ).execute()
+        self.fake.table("widget_sites").insert(
+            {"id": 2, "domain": "other.example.com", "label": "Other",
+             "sms_reporting_enabled": False, "sms_carrier": "MTN"}
+        ).execute()
+
+    def test_attaches_to_opted_in_site_with_matching_carrier(self):
+        self.assertEqual(sms_reports.attribute_site(self.fake, "MTN"), 1)
+
+    def test_carrier_matching_is_not_brittle(self):
+        for spelling in ("mtn", "MTN Ghana", "  Mtn  ", "MTN Ghana Limited"):
+            self.assertEqual(sms_reports.attribute_site(self.fake, spelling), 1, spelling)
+
+    def test_does_not_attach_to_a_site_that_did_not_opt_in(self):
+        # Only MTN is opted in here; Telecel has no opted-in site.
+        self.assertIsNone(sms_reports.attribute_site(self.fake, "Telecel"))
+
+    def test_does_not_attach_when_no_carrier_given(self):
+        self.assertIsNone(sms_reports.attribute_site(self.fake, None))
+        self.assertIsNone(sms_reports.attribute_site(self.fake, "   "))
+
+    def test_never_attaches_when_no_opted_in_site_declares_a_carrier(self):
+        # Isolate the case: one opted-in site, but it never named its carrier.
+        self.fake.tables["widget_sites"] = [
+            {"id": 3, "domain": "third.example.com", "sms_reporting_enabled": True,
+             "sms_carrier": None}
+        ]
+        self.assertIsNone(
+            sms_reports.attribute_site(self.fake, "MTN"),
+            "a site with no declared carrier must never be matched on a guess",
+        )
+
+
+class SmsKAnonymityTests(unittest.TestCase):
+    """The suppression rule, which must not be bypassable for SMS data."""
+
+    def _report(self, i, lat=5.60, lon=-0.19, ph=None):
+        return {
+            "phone_hash": ph or f"hash{i}",
+            "quality_rating": 5,
+            "frustration": 4,
+            "gender": "f" if i % 2 else "m",
+            "lat": lat, "lon": lon,
+        }
+
+    def test_single_reporter_cell_is_suppressed(self):
+        self.assertEqual(sms_reports.aggregate_sms_cells([self._report(1)]), [])
+
+    def test_two_reporter_cell_is_suppressed(self):
+        self.assertEqual(sms_reports.aggregate_sms_cells([self._report(1), self._report(2)]), [])
+
+    def test_three_distinct_reporters_publishes(self):
+        cells = sms_reports.aggregate_sms_cells([self._report(i) for i in range(3)])
+        self.assertEqual(len(cells), 1)
+        self.assertEqual(cells[0]["contributor_count"], 3)
+
+    def test_repeated_reports_from_one_person_do_not_reach_the_threshold(self):
+        # Same person reporting five times is still one contributor. Without
+        # this, a single prolific texter would unlock a cell.
+        rows = [self._report(0, ph="same-person") for _ in range(5)]
+        self.assertEqual(sms_reports.aggregate_sms_cells(rows), [])
+
+    def test_threshold_matches_the_scan_aggregation(self):
+        self.assertEqual(MIN_DEVICES_PER_CELL, 3)
+
+    def test_reports_without_coordinates_are_skipped(self):
+        rows = [dict(self._report(i), lat=None, lon=None) for i in range(5)]
+        self.assertEqual(sms_reports.aggregate_sms_cells(rows), [])
+
+    def test_distant_cells_are_separate_and_independently_suppressed(self):
+        rows = [self._report(i, lat=5.60) for i in range(3)]
+        rows += [self._report(100 + i, lat=6.20) for i in range(1)]
+        cells = sms_reports.aggregate_sms_cells(rows)
+        self.assertEqual(len(cells), 1, "the one-reporter cell must stay suppressed")
+        self.assertAlmostEqual(cells[0]["lat"], 5.60, places=4)
+
+    def test_gender_breakdown_only_survives_within_a_published_cell(self):
+        rows = [self._report(i) for i in range(3)]
+        cells = sms_reports.aggregate_sms_cells(rows)
+        self.assertIn("gender_split", cells[0])
+        # _report(i) is 'm' for even i, so i=0,1,2 gives two m and one f.
+        self.assertEqual(cells[0]["gender_split"], {"f": 1, "m": 2})
+
+
+class SmsRouteTests(unittest.TestCase):
+    """The webhook must never crash on a hostile or empty payload."""
+
+    def setUp(self):
+        self.fake = _Db()
+        db._client = self.fake
+        appmod.get_client = lambda: self.fake
+        owner_auth.OWNER_SESSION_SECRET = "test-owner-session-secret"
+        owner_auth.SMS_PHONE_PEPPER = "test-phone-pepper"
+        self.client = appmod.app.test_client()
+
+    def test_webhook_starts_a_report(self):
+        r = self.client.post("/api/sms/inbound", data={"from": "+233201234567", "text": "hi"})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("1", r.json["reply"])
+        self.assertEqual(len(self.fake.rows("sms_sessions")), 1)
+
+    def test_payload_without_a_sender_is_ignored_not_500(self):
+        r = self.client.post("/api/sms/inbound", data={"text": "hi"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json["status"], "ignored")
+
+    def test_json_body_is_also_accepted(self):
+        r = self.client.post("/api/sms/inbound", json={"from": "+233201234567", "text": "hi"})
+        self.assertEqual(r.status_code, 200)
+
+    def test_empty_body_does_not_crash(self):
+        self.assertEqual(self.client.post("/api/sms/inbound", data={}).status_code, 200)
+
+
+if __name__ == "__main__":
+    unittest.main()

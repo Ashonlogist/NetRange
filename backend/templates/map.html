@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>NetRange — Coverage Map</title>
     <link rel="icon" type="image/png" href="/static/favicon.png">
     <link rel="stylesheet" href="/static/vendor/leaflet.css" />
@@ -797,9 +797,33 @@
            already crowded by the native menu button and the "Target: <network>"
            label, and the WebView draws above both, so a control parked there
            landed on top of the target label and looked broken. The top-right
-           corner is empty on every screen size. */
+           corner is empty on every screen size.
+
+           Both this and .layer-switcher clear the status bar via
+           env(safe-area-inset-top) rather than assuming the page starts at 0.
+           That inset is only ever non-zero if the host draws the page edge to
+           edge (see viewport-fit=cover in the meta tag); where it is 0 the
+           calc() collapses to the same offset as before, so this cannot make
+           any layout worse than it already was.
+
+           The layer switcher gets the smaller offset and this sits BELOW it.
+           The switcher is a control you tap to change the basemap; search is
+           the thing you reach for mid-task, so the switcher anchoring the
+           column reads better and keeps the two from ever trading places. */
+        body.is-app {
+            --app-safe-top: env(safe-area-inset-top, 0px);
+            /* Measured from the switcher at runtime (see syncAppChromeOffsets)
+               so the search field cannot drift onto it if the button labels
+               or font size change. The literal is only the pre-measure value. */
+            --app-layer-h: 48px;
+        }
+        body.is-app .layer-switcher {
+            top: calc(12px + var(--app-safe-top));
+            right: 14px;
+            z-index: 901;
+        }
         body.is-app .map-search {
-            top: 14px;
+            top: calc(12px + var(--app-layer-h) + 10px + var(--app-safe-top));
             bottom: auto;
             left: auto;
             right: 14px;
@@ -1164,7 +1188,31 @@
                 // Lets CSS reposition the search without JS style-poking, and
                 // is what arms the collapsed-icon behaviour.
                 document.body.classList.add('is-app');
+                syncAppChromeOffsets();
+                window.addEventListener('resize', syncAppChromeOffsets);
+                window.addEventListener('orientationchange', syncAppChromeOffsets);
             });
+        }
+
+        /**
+         * Publish the layer switcher's real height as --app-layer-h so the
+         * search field below it can never grow into it.
+         *
+         * Measured rather than hard-coded: the switcher's height depends on
+         * button labels, icon size and the WebView's font scaling, all of
+         * which have changed at least once. A stale literal here is exactly
+         * the overlap this is meant to prevent, and it would only show up on
+         * someone else's device with a larger system font.
+         */
+        function syncAppChromeOffsets() {
+            var sw = document.querySelector('.layer-switcher');
+            if (!sw) return;
+            var h = Math.round(sw.getBoundingClientRect().height);
+            // Guard against measuring a hidden/undisplayed element as 0, which
+            // would drop the search field straight back on top of it.
+            if (h > 0) {
+                document.body.style.setProperty('--app-layer-h', h + 'px');
+            }
         }
 
         var map;

@@ -217,19 +217,37 @@ class TelephonyModule : Module() {
   /**
    * The SIM a scan should be filed under.
    *
-   * Preference order matters: the default data subscription that actually has
-   * a bearer, then the default subscription even if it looks idle, then
-   * whichever SIM has a bearer, then whatever is there. This is the difference
-   * between "Telecel" and "MTN" on a dual-SIM handset.
+   * Preference order matters, and the order that is wrong here is expensive:
+   * filing a scan under an idle SIM is how a phone on Telecel in SIM2 keeps
+   * reporting "MTN" with a null signal. `defaultDataSubId()` is the OS's
+   * *preference*, not a statement about what is currently carrying traffic, so
+   * a default sub with no live bearer must never outrank a sub that has one.
+   *
+   * So a live data bearer is checked first, and only then do we fall back to
+   * the default as a last resort for when nothing has a bearer at all. Among
+   * candidates that do have a bearer we prefer the default one, purely to keep
+   * the choice deterministic when both SIMs are live -- otherwise it would
+   * silently be "whichever slot is physically first".
+   *
+   * An explicit `preferredSubId` still wins outright: the user picked that SIM
+   * in the app, so no heuristic gets to overrule them. If their pick turns out
+   * to be reading null the TypeScript layer retries the other sub, rather than
+   * silently swapping the carrier label out from under the pinned choice.
    */
   private fun pickSubscription(
     subs: List<SubscriptionInfo>,
-    defaultSub: Int?
-  ): SubscriptionInfo? =
-    subs.firstOrNull { it.subscriptionId == defaultSub && hasDataBearer(it.subscriptionId) }
-      ?: subs.firstOrNull { it.subscriptionId == defaultSub }
-      ?: subs.firstOrNull { hasDataBearer(it.subscriptionId) }
-      ?: subs.firstOrNull()
+    defaultSub: Int?,
+    preferredSubId: Int?
+  ): SubscriptionInfo? {
+    if (preferredSubId != null) {
+      subs.firstOrNull { it.subscriptionId == preferredSubId }?.let { return it }
+    }
+    val defaultLive = subs.firstOrNull { it.subscriptionId == defaultSub && hasDataBearer(it.subscriptionId) }
+    if (defaultLive != null) return defaultLive
+    val otherLive = subs.firstOrNull { it.subscriptionId != defaultSub && hasDataBearer(it.subscriptionId) }
+    if (otherLive != null) return otherLive
+    return subs.firstOrNull { it.subscriptionId == defaultSub } ?: subs.firstOrNull()
+  }
 
   override fun definition() = ModuleDefinition {
     Name("NetRangeTelephony")
@@ -252,10 +270,10 @@ class TelephonyModule : Module() {
      * -- no permission, no SIM -- is actually in play, because "grant the
      * permission" and "put a SIM in the phone" are different advice.
      */
-    AsyncFunction("getActiveCellularAsync") {
+    AsyncFunction("getActiveCellularAsync") { preferredSubId: Int? ->
       val defaultSub = defaultDataSubId()
       val subs = subscriptions()
-      val pick = pickSubscription(subs, defaultSub)
+      val pick = pickSubscription(subs, defaultSub, preferredSubId)
       if (pick == null) {
         return@AsyncFunction mapOf<String, Any?>(
           "available" to false,

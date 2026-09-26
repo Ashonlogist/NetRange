@@ -1,5 +1,9 @@
 import { NativeModules, Platform } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
+import {
+  otherSubscriptionId,
+  shouldRetryOtherSubscription,
+} from './cellularSelection';
 
 /**
  * One cellular reading, however it was obtained.
@@ -159,6 +163,45 @@ async function netInfoReading(): Promise<CellularReading | null> {
  * signal is always the real one: overriding the *label* must not mean
  * inventing the *measurement*.
  */
+/**
+ * A null signal from a heuristically-chosen SIM is a bad outcome, not a real
+ * measurement. `pickSubscription` picks the SIM that *looks* like it is live,
+ * and "looks live" is guesswork -- so if that read comes back null, try the
+ * one other sub before accepting the null. One extra native call, and a
+ * dual-SIM phone stops filing its scans under a carrier it is not on.
+ *
+ * Skipped when the caller pinned a SIM. That is an explicit choice, and
+ * silently re-filing the reading under a different carrier is precisely the
+ * behaviour the pin exists to prevent. A pinned-but-silent SIM stays reported
+ * as itself, honestly null, so it counts as a skipped scan rather than
+ * becoming someone else's signal.
+ */
+async function retryOtherSubscription(
+  firstSubId: number | undefined,
+): Promise<CellularReading | null> {
+  const n = native();
+  if (!n) return null;
+  const subs = await listSubscriptions();
+  const otherId = otherSubscriptionId(subs, firstSubId);
+  if (otherId == null) return null;
+  try {
+    const alt = await n.getActiveCellularAsync(otherId);
+    if (!alt.available) return null;
+    const dbm = typeof alt.signalDbm === 'number' ? alt.signalDbm : undefined;
+    if (dbm === undefined) return null;
+    return {
+      carrier: alt.carrierName || '',
+      signalDbm: dbm,
+      networkType: alt.networkType || 'Unknown',
+      isConnected: alt.hasDataBearer ?? true,
+      simSlot: alt.simSlot,
+      subscriptionId: alt.subscriptionId,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function readCellular(
   overrideCarrier?: string,
   preferredSubId?: number | null,
@@ -178,6 +221,9 @@ export async function readCellular(
           simSlot: active.simSlot,
           subscriptionId: active.subscriptionId,
         };
+        if (shouldRetryOtherSubscription(base.signalDbm, preferredSubId)) {
+          base = (await retryOtherSubscription(base.subscriptionId)) ?? base;
+        }
       }
     } catch {
       base = null;

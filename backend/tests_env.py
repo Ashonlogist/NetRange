@@ -18,3 +18,13 @@ os.environ.setdefault("DASHBOARD_USERNAME", "test-user")
 os.environ.setdefault("DASHBOARD_PASSWORD", "test-pass")
 os.environ.setdefault("SUPABASE_URL", "https://stub.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_KEY", "stub-service-key")
+
+# Owner accounts + SMS reporting (network-owner widget path).
+#
+# app.py refuses to import without these. Both are secrets that must never
+# share a value in production -- OWNER_SESSION_SECRET signs owner session
+# cookies and SMS_PHONE_PEPPER keys the phone-number HMAC -- so they get
+# distinct non-default test values. If a test ever asserted that one of them
+# worked while set to the other, it would catch a real coupling bug.
+os.environ.setdefault("OWNER_SESSION_SECRET", "test-owner-session-secret")
+os.environ.setdefault("SMS_PHONE_PEPPER", "test-phone-pepper")

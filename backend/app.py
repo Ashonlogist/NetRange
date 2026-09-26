@@ -6,10 +6,10 @@ import time
 import secrets
 import requests
 from datetime import datetime, timezone, timedelta
-from flask import Flask, render_template, request, jsonify, send_from_directory, redirect, abort, Response, session
+from flask import Flask, render_template, request, jsonify, send_from_directory, redirect, abort, Response, session, g
 from flask_cors import CORS
 from scanner import scan, get_current_connection, signal_to_dbm
-from db import save_scan, load_scans, get_client
+from db import save_scan, load_scans, load_widget_scans, get_client
 from algorithm import delaunay_interpolate, generate_contours, mesh_geojson
 from analytics import (aggregate_coverage_cells, carrier_comparison,
                         daily_quality_trend, weak_zones, data_quality_summary)
@@ -18,6 +18,12 @@ import insights
 from geocoding import reverse_geocode_cells
 from api_keys import require_api_key
 from device_auth import issue_token_for_device, registration_throttled, require_device_token
+import owner_auth
+import sms_reports
+from owner_auth import (OWNER_SESSION_KEY, check_csrf, client_ip, create_owner,
+                        csrf_token, login_throttled, normalize_domain, origin_allowed,
+                        owner_required, owner_sites, register_site, site_for_domain,
+                        verify_login, widget_throttled)
 
 app = Flask(__name__)
 CORS(app)
@@ -50,7 +56,23 @@ def _required_env(name):
 DASHBOARD_SECRET = _required_env("DASHBOARD_SECRET")
 DASHBOARD_USERNAME = _required_env("DASHBOARD_USERNAME")
 DASHBOARD_PASS = _required_env("DASHBOARD_PASSWORD")
-app.secret_key = DASHBOARD_SECRET
+
+# Owner accounts (network owners embedding the widget) get their OWN signing
+# key and their OWN password store, deliberately separate from the admin
+# dashboard's DASHBOARD_* credentials.
+#
+# The dashboard is HTTP Basic and never touches Flask's session, so
+# DASHBOARD_SECRET's only job is being the admin password -- it signs nothing.
+# That is what makes this safe: pointing Flask's session at a second secret
+# cannot "reuse" the admin credential, because no admin cookie ever existed.
+# Rotating OWNER_SESSION_SECRET logs site owners out and nobody else; rotating
+# DASHBOARD_SECRET changes the admin password and disturbs no sessions.
+#
+# Were the dashboard ever to become session-based, this pairing would have to be
+# revisited -- a shared key would mean one leak mints both.
+OWNER_SESSION_SECRET = _required_env("OWNER_SESSION_SECRET")
+SMS_PHONE_PEPPER = _required_env("SMS_PHONE_PEPPER")
+app.secret_key = OWNER_SESSION_SECRET
 
 # SCAN_AUTH_ENFORCED_AT (the grace window that keeps pre-token app builds
 # working) is deliberately *not* read here -- device_auth.scan_auth_enforced()
@@ -1022,6 +1044,266 @@ def api_snapshot():
             },
         })
     return jsonify({"type": "FeatureCollection", "metadata": meta, "features": features})
+
+
+# ==========================================================================
+# NETWORK OWNER ACCOUNTS + WIDGET + SMS
+# See NEW_DATA_SOURCES.md for the trust models and where suppression applies.
+# ==========================================================================
+
+# Owner session cookie flags.
+#
+# Set once at import, not per-request: the Flask session is used ONLY for owner
+# accounts, and a per-request call that happened to be missed on one route
+# would silently fall back to Flask's defaults (Secure=False, SameSite=None).
+# That is exactly the kind of gap that looks fine in a curl test and leaks in
+# production, so there is no code path where the flags can be unset.
+#
+# Flask config keys are UPPER_SNAKE. An earlier version of this block used
+# lowercase keys ("samesite", "secure"), which Flask accepts without complaint
+# and then ignores -- the cookie shipped with neither flag. The test asserting
+# on the emitted Set-Cookie header is the only reason that was caught.
+app.config["SESSION_COOKIE_HTTPONLY"] = True    # unreadable from JS
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"   # not attached to cross-site POSTs
+app.config["SESSION_COOKIE_NAME"] = "nr_owner_session"
+# Secure is relaxed only under app.debug, where the dev server is plain HTTP on
+# localhost and the cookie would otherwise be dropped, making login appear to
+# fail for no visible reason. Never relaxed in production.
+app.config["SESSION_COOKIE_SECURE"] = not app.debug
+app.config["SESSION_COOKIE_MAX_AGE"] = 60 * 60 * 8
+
+
+@app.route("/get-access")
+def get_access():
+    return render_template("get-access.html", k=analytics.MIN_DEVICES_PER_CELL)
+
+
+@app.route("/widget.js")
+def widget_js():
+    # Cache briefly: a stale consent prompt is a privacy bug, an endlessly
+    # re-fetching one is only a performance one. Short TTL, and no CDN.
+    resp = send_from_directory("static", "widget.js", max_age=300)
+    resp.headers["Access-Control-Allow-Origin"] = "*"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+
+@app.route("/api/widget-scan", methods=["POST"])
+def widget_scan():
+    """
+    One browser-submitted coverage sample.
+
+    Deliberately NOT behind require_device_token: a website visitor has no app
+    install and therefore no device token to present. See
+    owner_auth.origin_allowed for why origin-checking + IP throttling is the
+    right substitute rather than a weaker copy of the same control.
+    """
+    if widget_throttled():
+        return jsonify({"error": "too many reports from this address"}), 429
+
+    site = site_for_domain(_origin_domain())
+    if not site:
+        return jsonify({"error": "unregistered origin"}), 403
+    if not origin_allowed(site["domain"]):
+        return jsonify({"error": "origin not allowed"}), 403
+
+    payload = request.get_json(silent=True) or {}
+
+    def num(v, lo, hi):
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return f if lo <= f <= hi else None
+
+    lat = num(payload.get("lat"), -90, 90)
+    lon = num(payload.get("lon"), -180, 180)
+    accuracy = num(payload.get("accuracy"), 0, 100000)
+    if lat is None or lon is None:
+        # Not an error: the prompt says location is optional, and geolocation is
+        # declined by most visitors. A row without coordinates is still useful
+        # for connection-type aggregates; it just cannot be mapped.
+        lat = lon = accuracy = None
+
+    contributor = (payload.get("contributor_id") or "").strip()[:64] or None
+    row = {
+        # A browser cannot read the SSID, the BSSID, the channel or a signal
+        # level. Fabricating any of them would be worse than NULL, so this row
+        # is deliberately sparse -- see NEW_DATA_SOURCES.md.
+        "ssid": None,
+        "signal_dbm": None,
+        "device_id": contributor,
+        "lat": lat,
+        "lon": lon,
+        "accuracy": accuracy,
+        # Radio type is genuinely unknown for a browser visitor. NULL says so;
+        # defaulting to 'mobile' would assert a WiFi-vs-cellular fact we do not
+        # have, and would let widget rows pass wifi-only or cellular-only filters.
+        "source": None,
+        "ingest_source": "widget",
+        # From the Origin, never from the payload. Taking it from the body
+        # would let any caller file rows against any owner's dashboard.
+        "widget_site_id": site["id"],
+        "effective_type": (payload.get("effective_type") or None) and str(payload["effective_type"])[:32],
+        "conn_type": (payload.get("conn_type") or None) and str(payload["conn_type"])[:32],
+        "downlink_estimate_mbps": num(payload.get("downlink_estimate_mbps"), 0, 10000),
+        "rtt_ms": num(payload.get("rtt_ms"), 0, 60000),
+        "download_speed_mbps": None,  # never an estimate -- see the schema note
+    }
+    save_scan([row])
+    # 201 even when the row is sparse: the visitor consented, we recorded it,
+    # and there is nothing useful to tell them either way.
+    return jsonify({"ok": True}), 201
+
+
+def _origin_domain():
+    """Hostname from Origin, else Referer. Shared by the widget routes."""
+    for header in (request.headers.get("Origin"), request.headers.get("Referer")):
+        if not header:
+            continue
+        from urllib.parse import urlsplit
+        host = urlsplit(header if "://" in header else "https://" + header).hostname
+        if host:
+            return host.lstrip("www.")
+    return ""
+
+
+# ---------- owner auth pages ----------
+
+@app.route("/owner/register", methods=["GET", "POST"])
+def owner_register():
+    error = None
+    if request.method == "POST":
+        if login_throttled():
+            return render_template("owner-register.html", error="Too many attempts. Try again later."), 429
+        owner_id, error = create_owner(request.form.get("username"), request.form.get("password"))
+        if owner_id:
+            session[OWNER_SESSION_KEY] = owner_id
+            session.permanent = False
+            return redirect("/owner/")
+    return render_template("owner-register.html", error=error)
+
+
+@app.route("/owner/login", methods=["GET", "POST"])
+def owner_login():
+    error = None
+    if request.method == "POST":
+        if login_throttled():
+            return render_template("owner-login.html", error="Too many attempts. Try again later."), 429
+        owner_id = verify_login(request.form.get("username"), request.form.get("password"))
+        if owner_id:
+            session[OWNER_SESSION_KEY] = owner_id
+            return redirect("/owner/")
+        error = "Incorrect username or password."
+    return render_template("owner-login.html", error=error)
+
+
+@app.route("/owner/logout", methods=["POST"])
+def owner_logout():
+    check_csrf()
+    session.pop(OWNER_SESSION_KEY, None)
+    return redirect("/owner/login")
+
+
+def owner_site_stats(sites, scans):
+    """
+    Per-site coverage, through the SAME k-anonymity gate as the public map.
+
+    Deliberately not a separate, laxer path: aggregate_coverage_cells() is
+    called unmodified with analytics.MIN_DEVICES_PER_CELL, so an owner can never
+    see a cell the public map would suppress, nor a cell the public map shows
+    without suppression. Suppression is applied per site, since a site's
+    contributors and another's are different people.
+
+    `scans` must already be restricted to this owner's sites (load_widget_scans
+    does that with an owner-scoped id list). The per-site split below is then
+    just presentation of an already-scoped set, not the security boundary.
+
+    SMS reports are counted separately and are NOT folded into these numbers.
+    They are a different kind of evidence -- a person's rating, not a radio
+    measurement -- and get their own k-anonymity pass in
+    sms_reports.aggregate_sms_cells. Averaging a dBm against a 1-10 self-report
+    would be meaningless.
+    """
+    out = {}
+    for site in sites:
+        rows = [r for r in scans if r.get("widget_site_id") == site["id"]]
+        cells = aggregate_coverage_cells(rows) if rows else []
+        reverse_geocode_cells(cells)
+        out[site["id"]] = {"cells": cells, "reports": len(rows)}
+    return out
+
+
+@app.route("/owner/")
+@owner_required
+def owner_dashboard():
+    sites = owner_sites(g.owner_id)
+    scans = load_widget_scans([s["id"] for s in sites]) if sites else []
+    return render_template(
+        "owner-dashboard.html",
+        sites=sites,
+        csrf=csrf_token(),
+        stats=owner_site_stats(sites, scans),
+        min_contributors=analytics.MIN_DEVICES_PER_CELL,
+        widget_js_url=request.url_root.rstrip("/") + "/widget.js",
+    )
+
+
+@app.route("/owner/sites", methods=["POST"])
+@owner_required
+def owner_add_site():
+    check_csrf()
+    site, error = register_site(g.owner_id, request.form.get("domain"), request.form.get("label"))
+    if error:
+        return render_template("owner-dashboard.html", sites=owner_sites(g.owner_id),
+                               csrf=csrf_token(), error=error), 400
+    return redirect("/owner/")
+
+
+@app.route("/owner/sites/<int:site_id>/sms", methods=["POST"])
+@owner_required
+def owner_toggle_sms(site_id):
+    """
+    Flip sms_reporting_enabled for one of THIS owner's sites.
+
+    Scoped by owner_id in the update itself, not by a prior existence check: a
+    wrong site_id here must update zero rows, never someone else's.
+    """
+    check_csrf()
+    want = request.form.get("enabled") == "1"
+    resp = (get_client().table("widget_sites")
+            .update({"sms_reporting_enabled": want})
+            .eq("id", site_id)
+            .eq("owner_id", g.owner_id)      # query-level scoping
+            .execute())
+    if not resp.data:
+        abort(404)
+    return redirect("/owner/")
+
+
+# ---------- SMS inbound webhook (Africa's Talking) ----------
+
+@app.route("/api/sms/inbound", methods=["POST"])
+def sms_inbound():
+    """
+    Africa's Talking posts inbound SMS here as form data.
+
+    Unauthenticated by design: the carrier, not the sender, is the caller, and
+    there is no shared secret in their basic webhook. The trust model is
+    different again from both /api/scan and the widget -- a report can only ever
+    *add* answers to a session, is bounded by a 30-minute timeout, and its
+    output is k-anonymity-gated before anything is shown. The blast radius of a
+    forged request is a junk session, not a data leak.
+    """
+    try:
+        payload = request.form.to_dict() or (request.get_json(silent=True) or {})
+    except Exception:
+        payload = {}
+    number, _to, text = sms_reports.parse_inbound(payload)
+    if not number:
+        return jsonify({"status": "ignored", "reason": "no sender"}), 200
+    reply = sms_reports.handle_inbound(number, text or "")
+    return jsonify({"status": "ok", "reply": reply}), 200
 
 
 if __name__ == "__main__":

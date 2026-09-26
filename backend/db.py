@@ -82,13 +82,64 @@ def save_scan(records):
         "lon": r.get("lon"),
         "accuracy": r.get("accuracy"),
         "device_id": r.get("device_id"),
+        # Radio type ('cellular' / 'mobile'), NOT the ingestion channel.
         "source": r.get("source", "mobile"),
+        # Ingestion channel ('app' / 'widget' / 'sms'). Defaults to 'app' so
+        # every pre-existing caller keeps working unchanged; see
+        # db/schema_data_sources.sql for why this is a separate column.
+        "ingest_source": r.get("ingest_source", "app"),
         "client_timestamp": _to_iso(r.get("timestamp")),
         "download_speed_mbps": r.get("download_speed_mbps"),
+        # Browser-only fields (widget path). See db/schema_data_sources.sql for
+        # why the estimate is not folded into download_speed_mbps.
+        "widget_site_id": r.get("widget_site_id"),
+        "effective_type": r.get("effective_type"),
+        "conn_type": r.get("conn_type"),
+        "downlink_estimate_mbps": r.get("downlink_estimate_mbps"),
+        "rtt_ms": r.get("rtt_ms"),
     } for r in records]
 
     resp = client.table("scans").insert(rows).execute()
     return len(resp.data) if resp.data else 0
+
+
+def load_widget_scans(site_ids, limit=2000):
+    """
+    Scans belonging to specific widget sites, newest first.
+
+    Takes the site ids the caller already proved they own (owner_sites filters
+    by owner_id). The `.in_` filter is the security boundary: an owner cannot
+    widen this by passing a site id they do not own, because the set they can
+    obtain is itself owner-scoped upstream.
+    """
+    if not site_ids:
+        return []
+    client = get_client()
+    resp = (
+        client.table("scans")
+        .select("*")
+        .in_("widget_site_id", list(site_ids))
+        .order("created_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+    out = []
+    for row in resp.data or []:
+        out.append({
+            "ssid": row.get("ssid"),
+            "signal_dbm": row.get("signal_dbm"),
+            "lat": row.get("lat"),
+            "lon": row.get("lon"),
+            "device_id": row.get("device_id"),
+            "source": row.get("source"),
+            "ingest_source": row.get("ingest_source"),
+            "widget_site_id": row.get("widget_site_id"),
+            "effective_type": row.get("effective_type"),
+            "downlink_estimate_mbps": row.get("downlink_estimate_mbps"),
+            "download_speed_mbps": row.get("download_speed_mbps"),
+            "timestamp": row.get("client_timestamp") or row.get("created_at"),
+        })
+    return out
 
 
 def load_scans(limit=5000):
@@ -119,7 +170,12 @@ def load_scans(limit=5000):
             "accuracy": row.get("accuracy"),
             "device_id": row.get("device_id"),
             "source": row.get("source"),
+            "ingest_source": row.get("ingest_source") or "app",
             "timestamp": row.get("client_timestamp") or row.get("created_at"),
             "download_speed_mbps": row.get("download_speed_mbps"),
+            "effective_type": row.get("effective_type"),
+            "conn_type": row.get("conn_type"),
+            "downlink_estimate_mbps": row.get("downlink_estimate_mbps"),
+            "rtt_ms": row.get("rtt_ms"),
         })
     return out

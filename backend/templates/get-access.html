@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Get Access &middot; NetRange</title>
+    <style>
+:root{--bg:#070a14;--panel:rgba(255,255,255,.04);--border:rgba(255,255,255,.09);
+--text:rgba(255,255,255,.95);--dim:rgba(255,255,255,.6);--faint:rgba(255,255,255,.35);
+--accent:#7c3aed;--accent2:#06b6d4;--grad:linear-gradient(135deg,#7c3aed,#06b6d4);
+--danger:#f43f5e;--ok:#22c55e;}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);
+color:var(--text);-webkit-font-smoothing:antialiased;min-height:100vh;padding:0 0 80px}
+.wrap{max-width:860px;margin:0 auto;padding:0 20px}
+header.nav{display:flex;align-items:center;justify-content:space-between;
+padding:22px 0;margin-bottom:34px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.05em;text-decoration:none;color:var(--text)}
+.brand .ic{font-size:1.25em}
+h1{font-size:1.9em;font-weight:700;letter-spacing:-.02em;margin-bottom:8px}
+h2{font-size:1.15em;font-weight:600;margin:30px 0 12px}
+p.lede{color:var(--dim);font-size:1.02em;line-height:1.6;margin-bottom:26px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px;margin-bottom:18px}
+label{display:block;font-size:.82em;font-weight:600;margin:14px 0 6px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+input[type=text],input[type=password],input[type=email]{width:100%;padding:11px 13px;background:rgba(0,0,0,.3);
+border:1px solid var(--border);border-radius:9px;color:var(--text);font:inherit}
+input:focus{outline:2px solid var(--accent2);outline-offset:1px;border-color:transparent}
+button,.btn{padding:11px 22px;background:var(--grad);color:#fff;border:none;border-radius:9px;
+font:inherit;font-weight:600;cursor:pointer;text-decoration:none;display:inline-block}
+button:hover,.btn:hover{filter:brightness(1.1)}
+.btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn.danger{background:transparent;border:1px solid var(--border);color:var(--danger)}
+.err{background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.4);color:#fda4af;
+padding:11px 14px;border-radius:9px;margin-bottom:18px;font-size:.94em}
+.note{background:rgba(6,182,212,.07);border:1px solid rgba(6,182,212,.28);color:#a5f3fc;
+padding:13px 16px;border-radius:9px;font-size:.9em;line-height:1.55;margin:18px 0}
+.note.warn{background:rgba(245,158,11,.08);border-color:rgba(245,158,11,.35);color:#fcd34d}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em}
+pre{background:rgba(0,0,0,.45);border:1px solid var(--border);border-radius:9px;padding:14px;
+overflow-x:auto;font-size:.82em;line-height:1.5;white-space:pre-wrap;word-break:break-all}
+table{width:100%;border-collapse:collapse;font-size:.92em}
+th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--border)}
+th{color:var(--faint);font-size:.78em;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.tag{display:inline-block;padding:3px 9px;border-radius:20px;font-size:.74em;font-weight:600;
+background:rgba(34,197,94,.14);color:#86efac;border:1px solid rgba(34,197,94,.3)}
+.tag.off{background:rgba(255,255,255,.06);color:var(--faint);border-color:var(--border)}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.spread{justify-content:space-between}
+.muted{color:var(--dim)}.faint{color:var(--faint)}
+.small{font-size:.86em}
+ul.ticks{list-style:none;margin:12px 0 0}
+ul.ticks li{padding-left:24px;position:relative;margin-bottom:9px;color:var(--dim);line-height:1.55;font-size:.94em}
+ul.ticks li::before{content:"\2713";position:absolute;left:0;color:#22c55e;font-weight:700}
+footer{color:var(--faint);font-size:.85em;text-align:center;margin-top:44px;line-height:1.7}
+footer a{color:var(--dim)}
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <header class="nav">
+        <a class="brand" href="/"><span class="ic">&#128225;</span> NetRange</a>
+        <div class="row">
+            <a class="btn ghost" href="/owner/login">Owner sign in</a>
+            <a class="btn" href="/map">Open Map</a>
+        </div>
+    </header>
+
+    <h1>Get access</h1>
+    <p class="lede">Two separate paths, depending on what you need. Neither involves
+        payment &mdash; this page is about what the data is and who can have it.</p>
+
+    <!-- ===================== PATH A ===================== -->
+    <div class="card">
+        <div class="row spread">
+            <h2 style="margin:0">1. Add coverage reporting to your own site</h2>
+            <span class="tag">Self-serve &middot; free</span>
+        </div>
+        <p class="muted" style="margin-top:12px">If you run a network, a venue, a hotspot or a
+            campus WiFi, you can add a one-time consent widget to your own pages. Visitors who
+            tap Allow contribute their connection quality to the public map, and you get a
+            dashboard for the data coming from your domain.</p>
+        <ul class="ticks">
+            <li>Register an account and add your domain &mdash; no email verification, no billing.</li>
+            <li>Copy one <code>&lt;script&gt;</code> tag into your page.</li>
+            <li>Visitors see a consent prompt once per visit. Nothing is collected unless they tap Allow.</li>
+            <li>Your dashboard shows only data tied to your own registered domain.</li>
+        </ul>
+        <div class="row" style="margin-top:20px">
+            <a class="btn" href="/owner/register">Register a site</a>
+            <a class="btn ghost" href="/owner/login">I already have an account</a>
+        </div>
+        <div class="note" style="margin-bottom:0">
+            <strong>What a visitor is asked for:</strong> approximate location (via the browser's
+            own permission prompt, and only if they allow it), their connection type, and the
+            time of the visit. No cookie, no fingerprint, no advertising identifier, and no
+            client-side speed test. The widget asks on every page load, because the promise in
+            the prompt is "once per visit".
+        </div>
+    </div>
+
+    <!-- ===================== PATH B ===================== -->
+    <div class="card">
+        <div class="row spread">
+            <h2 style="margin:0">2. Need coverage or carrier data at scale</h2>
+            <span class="tag off">Talk to us</span>
+        </div>
+        <p class="muted" style="margin-top:12px">For telcos, ISPs, regulators and researchers who
+            need coverage cells, carrier comparisons or historical trends at volume. This path is
+            deliberately <em>not</em> self-serve: bulk access is a conversation about what you
+            need it for, and the answers are not always the same shape.</p>
+
+        <h3 class="small" style="margin:18px 0 8px;color:var(--text)">What's available</h3>
+        <ul class="ticks">
+            <li><strong>K-anonymized coverage cells.</strong> Averaged signal and speed per
+                geographic cell, with a contributor count and a recency confidence score.</li>
+            <li><strong>Carrier comparison.</strong> Per-network signal distributions, same
+                suppression rule.</li>
+            <li><strong>Daily quality trends.</strong> Signal and speed over time per cell,
+                with a minimum-contributor floor per day.</li>
+        </ul>
+
+        <div class="note warn">
+            <strong>What "safe to share" means here.</strong> Every cell is withheld entirely
+            unless at least {{ k }} independent contributors reported from it. This is
+            suppression, not rounding or blurring: a thin cell is not shown in a coarser form,
+            because a coarsened cell is still a cell someone lives in. Small-n breakdowns
+            (demographics, satisfaction) are the specific case this rule exists for, and they
+            are held to the same floor as everything else.
+        </div>
+
+        <p class="muted small">Tell us about your use case and we'll come back with what exists
+            and what we'd need to build.</p>
+        <div class="row" style="margin-top:18px">
+            <a class="btn" href="mailto:netrange@ashonlogist.website?subject=NetRange%20bulk%20coverage%20data%20request&amp;body=Hi%20NetRange%20team%2C%0A%0AWe%20would%20like%20to%20talk%20about%20bulk%20coverage%2Fcarrier%20data.%0A%0AWho%20we%20are%3A%0AWhat%20we%27d%20use%20it%20for%3A%0ARegion%20and%20scale%20we%27d%20need%3A%0AApproximate%20timeframe%3A%0A%0AThanks%21">
+                Email netrange@ashonlogist.website
+            </a>
+        </div>
+        <p class="faint small" style="margin-top:12px">That button opens your mail client with the
+            questions above already filled in. Nothing is sent to us from this page.</p>
+    </div>
+
+    <footer>
+        <a href="/">Home</a> &middot; <a href="/get-access">Get Access</a> &middot; <a href="/map">Coverage Map</a>
+    </footer>
+
+</div>
+</body>
+</html>

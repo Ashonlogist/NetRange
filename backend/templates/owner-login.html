@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Owner Sign In &middot; NetRange</title>
+    <style>
+:root{--bg:#070a14;--panel:rgba(255,255,255,.04);--border:rgba(255,255,255,.09);
+--text:rgba(255,255,255,.95);--dim:rgba(255,255,255,.6);--faint:rgba(255,255,255,.35);
+--accent:#7c3aed;--accent2:#06b6d4;--grad:linear-gradient(135deg,#7c3aed,#06b6d4);
+--danger:#f43f5e;--ok:#22c55e;}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);
+color:var(--text);-webkit-font-smoothing:antialiased;min-height:100vh;padding:0 0 80px}
+.wrap{max-width:860px;margin:0 auto;padding:0 20px}
+header.nav{display:flex;align-items:center;justify-content:space-between;
+padding:22px 0;margin-bottom:34px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:1.05em;text-decoration:none;color:var(--text)}
+.brand .ic{font-size:1.25em}
+h1{font-size:1.9em;font-weight:700;letter-spacing:-.02em;margin-bottom:8px}
+h2{font-size:1.15em;font-weight:600;margin:30px 0 12px}
+p.lede{color:var(--dim);font-size:1.02em;line-height:1.6;margin-bottom:26px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px;margin-bottom:18px}
+label{display:block;font-size:.82em;font-weight:600;margin:14px 0 6px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em}
+input[type=text],input[type=password],input[type=email]{width:100%;padding:11px 13px;background:rgba(0,0,0,.3);
+border:1px solid var(--border);border-radius:9px;color:var(--text);font:inherit}
+input:focus{outline:2px solid var(--accent2);outline-offset:1px;border-color:transparent}
+button,.btn{padding:11px 22px;background:var(--grad);color:#fff;border:none;border-radius:9px;
+font:inherit;font-weight:600;cursor:pointer;text-decoration:none;display:inline-block}
+button:hover,.btn:hover{filter:brightness(1.1)}
+.btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn.danger{background:transparent;border:1px solid var(--border);color:var(--danger)}
+.err{background:rgba(244,63,94,.1);border:1px solid rgba(244,63,94,.4);color:#fda4af;
+padding:11px 14px;border-radius:9px;margin-bottom:18px;font-size:.94em}
+.note{background:rgba(6,182,212,.07);border:1px solid rgba(6,182,212,.28);color:#a5f3fc;
+padding:13px 16px;border-radius:9px;font-size:.9em;line-height:1.55;margin:18px 0}
+.note.warn{background:rgba(245,158,11,.08);border-color:rgba(245,158,11,.35);color:#fcd34d}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.88em}
+pre{background:rgba(0,0,0,.45);border:1px solid var(--border);border-radius:9px;padding:14px;
+overflow-x:auto;font-size:.82em;line-height:1.5;white-space:pre-wrap;word-break:break-all}
+table{width:100%;border-collapse:collapse;font-size:.92em}
+th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--border)}
+th{color:var(--faint);font-size:.78em;text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.tag{display:inline-block;padding:3px 9px;border-radius:20px;font-size:.74em;font-weight:600;
+background:rgba(34,197,94,.14);color:#86efac;border:1px solid rgba(34,197,94,.3)}
+.tag.off{background:rgba(255,255,255,.06);color:var(--faint);border-color:var(--border)}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.spread{justify-content:space-between}
+.muted{color:var(--dim)}.faint{color:var(--faint)}
+.small{font-size:.86em}
+ul.ticks{list-style:none;margin:12px 0 0}
+ul.ticks li{padding-left:24px;position:relative;margin-bottom:9px;color:var(--dim);line-height:1.55;font-size:.94em}
+ul.ticks li::before{content:"\2713";position:absolute;left:0;color:#22c55e;font-weight:700}
+footer{color:var(--faint);font-size:.85em;text-align:center;margin-top:44px;line-height:1.7}
+footer a{color:var(--dim)}
+    </style>
+</head>
+<body>
+<div class="wrap">
+    <header class="nav">
+        <a class="brand" href="/"><span class="ic">&#128225;</span> NetRange</a>
+        <div class="row">
+            <a class="btn ghost" href="/get-access">Get Access</a>
+            <a class="btn" href="/map">Open Map</a>
+        </div>
+    </header>
+
+    <h1>Owner sign in</h1>
+    <p class="lede">Sign in to manage the sites you've registered and see coverage reported from them.</p>
+    {% if error %}<div class="err">{{ error }}</div>{% endif %}
+    <form method="post" action="/owner/login" class="card">
+        <label for="u">Username</label>
+        <input id="u" type="text" name="username" autocomplete="username" required autofocus>
+        <label for="p">Password</label>
+        <input id="p" type="password" name="password" autocomplete="current-password" required>
+        <div style="margin-top:22px"><button type="submit">Sign in</button></div>
+    </form>
+    <p class="muted small">No account? <a href="/owner/register" style="color:var(--accent2)">Register a site</a></p>
+    <footer>
+        <a href="/">Home</a> &middot; <a href="/get-access">Get Access</a> &middot; <a href="/map">Coverage Map</a><br>
+        Coverage data is k-anonymized: nothing is published until enough
+        independent contributors agree.
+    </footer>
+</div>
+</body>
+</html>
