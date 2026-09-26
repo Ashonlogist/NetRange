@@ -869,6 +869,28 @@ class TestDomainVerification(unittest.TestCase):
         self.assertEqual(
             self.c.post(f"/owner/sites/{sid}/verify").status_code, 400)
 
+    def test_timestamps_written_are_json_serializable(self):
+        """
+        The stub stores whatever it is handed, so a raw datetime sails through
+        every test here and then fails at the real client, which cannot encode
+        one. This asserts the wire format rather than trusting the stub.
+        """
+        import datetime
+        import json
+        sid = self._site()["id"]
+        owner_auth.set_site_verification(sid, True, "admin")
+        value = self.fake.rows("widget_sites")[0]["verified_at"]
+        self.assertIsInstance(value, str, "must be an ISO string on the wire")
+        self.assertIsInstance(datetime.datetime.fromisoformat(value),
+                              datetime.datetime)
+        json.dumps(value)   # the failure this guards against
+
+        owner_auth.set_approval(self.oid, True, "tester")
+        approved = [o for o in self.fake.rows("network_owners")
+                    if o["id"] == self.oid][0]["approved_at"]
+        json.dumps(approved)
+        self.assertIsInstance(approved, str)
+
     # --- admin override ---------------------------------------------------
 
     def test_admin_can_verify_by_hand_for_venues_without_dns_control(self):

@@ -698,7 +698,10 @@ def set_site_verification(site_id: int, verified: bool, by: str,
     patch = {
         "verification_status": "verified" if verified else "failed",
         "verification_method": by,
-        "verified_at": _now() if verified else None,
+        # ISO string, not a datetime. The in-memory test stub stores whatever it
+        # is handed, so a raw datetime passes every test and then fails at the
+        # client, which cannot JSON-encode one.
+        "verified_at": _iso(_now()) if verified else None,
         "verified_by": by if verified else None,
     }
     if verified:
