@@ -421,3 +421,72 @@ class SmsRouteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --------------------------------------------------------------------------
+# Cold start. These are the paths that only a real end-to-end run against the
+# live database exercised -- every other test in this file begins from a
+# session that already exists, which is exactly why a first-message bug
+# survived 35 passing tests.
+# --------------------------------------------------------------------------
+class TestColdStart(unittest.TestCase):
+    def test_first_message_rating_is_not_discarded(self):
+        """
+        An inbound SMS is the only way to open the conversation, so the opening
+        text is the first answer. It must not be thrown away.
+        """
+        db_ = _Db()
+        reply = sms_reports.handle_inbound("2331110001", "7", client=db_)
+        self.assertIn("which network", reply.lower())
+        row = db_.rows("sms_sessions")[0]
+        self.assertEqual(row["current_step"], "carrier")
+        self.assertEqual(row["answers"]["quality_rating"], 7)
+
+    def test_non_numeric_opening_message_asks_the_question(self):
+        db_ = _Db()
+        reply = sms_reports.handle_inbound("2331110002", "MTN", client=db_)
+        self.assertIn("1 (unusable)", reply)
+        self.assertEqual(db_.rows("sms_sessions")[0]["current_step"], "quality")
+        self.assertEqual(db_.rows("sms_sessions")[0]["answers"], {})
+
+    def test_start_keyword_still_asks_the_question(self):
+        """A greeting is not an answer, so START must not be read as a rating."""
+        db_ = _Db()
+        reply = sms_reports.handle_inbound("2331110003", "START", client=db_)
+        self.assertIn("1 (unusable)", reply)
+        self.assertEqual(db_.rows("sms_sessions")[0]["current_step"], "quality")
+
+    def test_first_message_can_complete_the_whole_report(self):
+        """A numeric opener must not leave the session one step short."""
+        db_ = _Db()
+        n = "2331110004"
+        self.assertIn("which network", sms_reports.handle_inbound(n, "8", client=db_).lower())
+        self.assertIn("where are you", sms_reports.handle_inbound(n, "MTN", client=db_).lower())
+        self.assertIn("gender", sms_reports.handle_inbound(n, "Kanda", client=db_).lower())
+        self.assertIn("frustrat", sms_reports.handle_inbound(n, "skip", client=db_).lower())
+        reply = sms_reports.handle_inbound(n, "9", client=db_)
+        self.assertIn("recorded", reply.lower())
+        self.assertEqual(db_.rows("sms_sessions"), [])
+        self.assertEqual(len(db_.rows("sms_reports")), 1)
+        report = db_.rows("sms_reports")[0]
+        self.assertEqual(report["quality_rating"], 8)
+        self.assertEqual(report["frustration"], 9)
+        self.assertIsNone(report["gender"])  # skip stayed NULL, not guessed
+
+    def test_out_of_range_opener_is_rejected_not_stored(self):
+        db_ = _Db()
+        for bad in ("0", "11", "99"):
+            reply = sms_reports.handle_inbound(f"23311100{bad[-2:]}", bad, client=db_)
+            self.assertIn("1 (unusable)", reply)
+        for row in db_.rows("sms_sessions"):
+            self.assertEqual(row["answers"], {})
+
+    def test_restart_discards_a_session_in_progress(self):
+        db_ = _Db()
+        n = "2331110005"
+        sms_reports.handle_inbound(n, "7", client=db_)
+        self.assertEqual(db_.rows("sms_sessions")[0]["current_step"], "carrier")
+        reply = sms_reports.handle_inbound(n, "START", client=db_)
+        self.assertIn("1 (unusable)", reply)
+        self.assertEqual(db_.rows("sms_sessions")[0]["current_step"], "quality")
+        self.assertEqual(db_.rows("sms_sessions")[0]["answers"], {})

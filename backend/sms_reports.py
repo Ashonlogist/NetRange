@@ -232,11 +232,31 @@ def handle_inbound(number: str, text: str, client=None) -> str:
     t = _clean(text)
     existing = get_session(client, phash)
 
+    # A new session, or an explicit restart. An inbound SMS is the only way to
+    # open a conversation -- there is no proactive send -- so the first thing a
+    # person sends IS their first answer.
+    #
+    # Discarding it and re-asking the opening question would waste a paid SMS on
+    # every single report, and would strand anyone whose first message was not a
+    # number. Someone who opens with "MTN" or "Osu" would then be judged against
+    # the 1-10 question forever, with no way out except START. So: try to read
+    # the opening message as a rating, and only ask the question when it is not
+    # one. Falling through to the question costs nothing extra, because the
+    # unreadable text was never going to be a valid answer.
     if not existing or re.fullmatch(r"(?i)\s*(start|report|hello|hi)\s*", t or ""):
         if existing:
             client.table("sms_sessions").delete().eq("phone_hash", phash).execute()
         start_session(client, phash)
-        return PROMPTS["quality"]
+        first = parse_rating(t) if not re.fullmatch(r"(?i)\s*(start|report|hello|hi)\s*", t or "") else None
+        if first is None:
+            return PROMPTS["quality"]
+        # They led with their rating; move the session on rather than repeat it.
+        client.table("sms_sessions").update({
+            "answers": {"quality_rating": first},
+            "current_step": next_step("quality"),
+            "last_activity_at": _iso(_now()),
+        }).eq("phone_hash", phash).execute()
+        return PROMPTS[next_step("quality")]
 
     if t.lower() in ("cancel", "stop", "quit"):
         client.table("sms_sessions").delete().eq("phone_hash", phash).execute()
