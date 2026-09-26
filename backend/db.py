@@ -97,6 +97,12 @@ def save_scan(records):
         "conn_type": r.get("conn_type"),
         "downlink_estimate_mbps": r.get("downlink_estimate_mbps"),
         "rtt_ms": r.get("rtt_ms"),
+        # Cellular network identity. `ssid` is a human-readable label the OS
+        # and the user can both change; these are the stable grouping key, so
+        # a rebrand or a case variant cannot split one network's coverage.
+        "carrier_identity": r.get("carrier_identity"),
+        "carrier_numeric": r.get("carrier_numeric"),
+        "carrier_name": r.get("carrier_name"),
     } for r in records]
 
     resp = client.table("scans").insert(rows).execute()
@@ -177,5 +183,8 @@ def load_scans(limit=5000):
             "conn_type": row.get("conn_type"),
             "downlink_estimate_mbps": row.get("downlink_estimate_mbps"),
             "rtt_ms": row.get("rtt_ms"),
+            "carrier_identity": row.get("carrier_identity"),
+            "carrier_numeric": row.get("carrier_numeric"),
+            "carrier_name": row.get("carrier_name"),
         })
     return out

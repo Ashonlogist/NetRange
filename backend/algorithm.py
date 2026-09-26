@@ -119,7 +119,7 @@ def prepare_points(scans, ssid_filter=None, now=None,
     filtered = scans
     if ssid_filter:
         ssf = ssid_filter.strip().lower()
-        filtered = [s for s in scans if s.get("ssid", "").lower() == ssf]
+        filtered = [s for s in scans if scan_matches(s, ssf)]
 
     now = now if now is not None else time.time()
     points = []
@@ -483,3 +483,122 @@ def mesh_geojson(scans, ssid_filter=None, now=None):
                "signal_dbm": round(p["signal_dbm"], 1),
                "download_speed_mbps": p.get("download_speed_mbps")} for p in mesh["points"]]
     return {"triangles": triangles, "points": points}
+
+
+# ---------------------------------------------------------------------------
+# Cellular network identity
+#
+# A carrier *name* is a display string, not an identity. Android sources it from
+# the SIM's SPN or the network's, a carrier profile update rewrites it, and a
+# user override in the app can replace it outright. 62002 is the live example:
+# the SIM in the field still reads "Telecel" while the network is Vodafone
+# Ghana, and that rename will eventually reach the SIM itself. Keying coverage
+# on the name splits one network's data in two the day it happens, and nothing
+# in the stored rows would show why.
+#
+# The MCC/MNC is the only stable identifier the radio gives us, so it is the
+# identity. The name stays as the label a human reads.
+#
+# Ghana (MCC 620) is spelled out because that is where the app is used. An
+# unknown PLMN is passed through unchanged rather than guessed at: a wrong
+# canonical name would be worse than an honest unfamiliar one.
+GHANA_MNC = {
+    "01": "MTN",
+    "02": "Telecel",          # now Vodafone Ghana; the SIM still says Telecel
+    "03": "AT",               # re-branded from AirtelTigo, Jan 2024
+    "04": "Expresso",
+    "06": "AT",               # AT's second MNC
+    "07": "Globacom",
+    "10": "Blu",
+}
+
+
+def normalize_plmn(numeric):
+    """Return the bare digits of an MCC/MNC string, or None if unusable.
+
+    Accepts the shapes Android actually produces ("62002", " 62002 ", 62002)
+    and rejects the placeholder values OEMs emit when they will not say:
+    "", "0", "65535", None.
+    """
+    if numeric is None or isinstance(numeric, bool):
+        return None
+    if not isinstance(numeric, (str, int, float)):
+        return None
+    digits = "".join(ch for ch in str(numeric) if ch.isdigit())
+    if len(digits) < 5:
+        return None
+    if digits in ("65535", "00000"):
+        return None
+    return digits
+
+
+def carrier_identity(numeric, name):
+    """The stable key a cellular reading should be grouped and attributed by.
+
+    Returns (identity, display, canonical). `identity` is what rows are grouped
+    and filtered on, so it must not change when a network rebrands. `display`
+    is the best label available, preferring a name we recognise for the PLMN
+    over whatever string the OS happened to hand us, and falling back to the
+    raw name for networks not in the table.
+    """
+    plmn = normalize_plmn(numeric)
+    canonical = None
+    if plmn and plmn.startswith("620"):
+        canonical = GHANA_MNC.get(plmn[3:])
+
+    raw = (name or "").strip()
+    display = canonical or raw or "Cellular"
+    # With no PLMN, the name is all there is, so fall back to it lowercased to
+    # stop "Telecel" and "telecel" landing in two buckets.
+    identity = plmn or raw.lower()
+    return identity, display, canonical
+
+
+def carrier_from_name(name):
+    """Best-effort PLMN for a row stored before carrier_numeric existed.
+
+    Only for the migration of historical rows. Returns None when the name is
+    not one we recognise, because guessing would attach a network's coverage
+    to the wrong operator -- the exact failure this whole mechanism exists to
+    prevent.
+    """
+    if not isinstance(name, str):
+        return None
+    n = name.strip().lower()
+    if not n:
+        return None
+    for mnc, canonical in GHANA_MNC.items():
+        if n == canonical.lower() or n.startswith(canonical.lower() + " "):
+            return "620" + mnc
+    return None
+
+
+def scan_group_key(scan):
+    """The stable bucket a stored scan belongs to.
+
+    Prefers the PLMN, so rows recorded before `carrier_numeric` existed and
+    rows recorded after a rebrand land in the same bucket. Falls back to the
+    lowercased name only when no PLMN is available, which at least stops
+    "Telecel" and "telecel" -- both of which are in the live data -- splitting
+    one network's coverage in two.
+    """
+    ident = scan.get("carrier_identity")
+    if ident:
+        return str(ident).strip().lower()
+    plmn = normalize_plmn(scan.get("carrier_numeric"))
+    if plmn:
+        return plmn
+    return str(scan.get("ssid", "")).strip().lower()
+
+
+def scan_matches(scan, ssf):
+    """Whether a scan belongs to a filter.
+
+    Accepts either the stable key or the display name, so a UI can filter on
+    "Telecel" or on "62002" and get the same rows.
+    """
+    if not ssf:
+        return True
+    if scan_group_key(scan) == ssf:
+        return True
+    return str(scan.get("ssid", "")).strip().lower() == ssf

@@ -2,6 +2,7 @@ import { NativeModules, Platform } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import {
   otherSubscriptionId,
+  pickSubscriptionId,
   shouldRetryOtherSubscription,
 } from './cellularSelection';
 
@@ -22,6 +23,17 @@ export interface CellularReading {
   /** Which SIM this came from, when the OS will say. */
   simSlot?: number;
   subscriptionId?: number;
+  /**
+   * The registered network's MCC-MNC, e.g. "62002".
+   *
+   * This is the only part of a reading that identifies a network
+   * factually. `carrier` is a display string that the OS, a carrier profile
+   * update, or a user override can all change -- this SIM is branded Telecel
+   * while the network it is camped on is 62002, now Vodafone Ghana, and that
+   * rename will reach the SIM eventually. Attributing on the string would
+   * split one network's coverage in two; attributing on this cannot.
+   */
+  carrierNumeric?: string;
   /** True when the carrier name came from a user override, not the network. */
   overridden?: boolean;
 }
@@ -191,6 +203,7 @@ async function retryOtherSubscription(
     if (dbm === undefined) return null;
     return {
       carrier: alt.carrierName || '',
+      carrierNumeric: alt.carrierNumeric ?? undefined,
       signalDbm: dbm,
       networkType: alt.networkType || 'Unknown',
       isConnected: alt.hasDataBearer ?? true,
@@ -211,16 +224,40 @@ export async function readCellular(
 
   if (n) {
     try {
-      const active = await n.getActiveCellularAsync(preferredSubId ?? null);
+      // Choose the subscription here, not in the native heuristic.
+      //
+      // `pickSubscriptionId` is unit tested and the Kotlin `pickSubscription`
+      // is not, and the two had drifted apart: the Kotlin order preferred a sub
+      // reporting a live data bearer, which on a phone that is on WiFi selects
+      // the *idle* SIM. Passing the result down as an explicit subscription id
+      // takes the native pin branch, so the tested order is the one that
+      // ships. If the status call fails for any reason we still fall through to
+      // the previous behaviour rather than losing the reading.
+      let chosen: number | null = preferredSubId ?? null;
+      try {
+        const status = await n.getCellularStatusAsync();
+        chosen = pickSubscriptionId(status.subscriptions ?? [], {
+          defaultSubId: status.defaultSubscriptionId,
+          preferredSubId,
+        });
+      } catch {
+        /* keep the pin, or null to let the native side decide */
+      }
+
+      const active = await n.getActiveCellularAsync(chosen);
       if (active.available) {
         base = {
           carrier: active.carrierName || '',
+          carrierNumeric: active.carrierNumeric ?? undefined,
           signalDbm: typeof active.signalDbm === 'number' ? active.signalDbm : undefined,
           networkType: active.networkType || 'Unknown',
           isConnected: active.hasDataBearer ?? false,
           simSlot: active.simSlot,
           subscriptionId: active.subscriptionId,
         };
+        // The *user's* pin, not `chosen`: `chosen` is non-null on every dual-SIM
+        // phone now, and passing it would silently disable the retry for every
+        // heuristic pick, which is the case the retry exists for.
         if (shouldRetryOtherSubscription(base.signalDbm, preferredSubId)) {
           base = (await retryOtherSubscription(base.subscriptionId)) ?? base;
         }

@@ -53,6 +53,14 @@ interface CellularInfo {
   simSlot?: number;
   subscriptionId?: number;
   overridden?: boolean;
+  /**
+   * MCC+MNC of the network this SIM is camped on. Shown next to `carrier`
+   * because the two can disagree -- the SIM says Telecel, the network is
+   * 62002 (Vodafone Ghana) -- and a disagreement is worth seeing rather than
+   * guessing at. This is the value scans are attributed on; `carrier` is only
+   * a label.
+   */
+  carrierNumeric?: string;
 }
 
 function signalColor(dbm: number) {
@@ -930,6 +938,10 @@ export default function HomeScreen() {
                               <Text style={s.networkMeta}>
                                 {sim.networkType || 'network unknown'}
                                 {sim.signalDbm != null ? ` · ${Math.round(sim.signalDbm)} dBm` : ' · no signal reading'}
+                                {/* The PLMN is the only part of this that is an
+                                    identity rather than a label, so it is shown
+                                    next to the name it can disagree with. */}
+                                {sim.carrierNumeric ? ` · PLMN ${sim.carrierNumeric}` : ''}
                               </Text>
                             </View>
                           </View>
@@ -972,6 +984,11 @@ export default function HomeScreen() {
           ) : (
             <>
               <Text style={s.sectionTitle}>Carrier Override</Text>
+              <Text style={s.hintText}>
+                {cellularInfo?.carrier
+                  ? `Detected from the network: ${cellularInfo.carrier}${cellularInfo.carrierNumeric ? ` (PLMN ${cellularInfo.carrierNumeric})` : ''}. Leave the field empty to use it.`
+                  : 'Waiting for a cellular reading from the network.'}
+              </Text>
               <Input
                 label="Carrier Name"
                 value={carrierOverride}
@@ -980,7 +997,7 @@ export default function HomeScreen() {
               />
               <Text style={s.hintText}>
                 {carrierOverride.trim()
-                  ? 'Active — this name is used for every cellular scan, overriding what the network reports.'
+                  ? 'Active — this changes the label only. Which network a scan is attributed to comes from the SIM\'s PLMN, so renaming here cannot misfile your data.'
                   : 'No override set. NetRange uses the carrier detected from the network.'}
               </Text>
               <View style={{ gap: 8 }}>

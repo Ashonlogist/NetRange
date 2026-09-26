@@ -11,7 +11,9 @@ from flask import Flask, render_template, request, jsonify, send_from_directory,
 from flask_cors import CORS
 from scanner import scan, get_current_connection, signal_to_dbm
 from db import save_scan, load_scans, load_widget_scans, get_client
-from algorithm import delaunay_interpolate, generate_contours, mesh_geojson
+from algorithm import (carrier_from_name, carrier_identity, delaunay_interpolate,
+                       generate_contours, mesh_geojson, normalize_plmn,
+                       scan_matches, scan_group_key)
 from analytics import (aggregate_coverage_cells, carrier_comparison,
                         daily_quality_trend, weak_zones, data_quality_summary)
 import analytics
@@ -493,8 +495,22 @@ def api_scan_post():
             # and produced a flat, meaningless coverage map; a NULL is skipped by
             # the interpolator, which is the honest outcome.
             cell_dbm = to_dbm(signal_strength)
+
+        # Which network this scan belongs to is decided by the PLMN, not by the
+        # carrier name the phone happened to display. The two can disagree --
+        # 62002 is branded Telecel on the SIM while the network is Vodafone
+        # Ghana -- and the name is also the field a user override writes to, so
+        # it is the one input that cannot be trusted as an identity.
+        identity, display, _canonical = carrier_identity(
+            cellular.get("carrierNumeric"), cellular.get("carrier"))
+
         records.append({
-            "ssid": (cellular.get("carrier") or "Cellular").strip(),
+            "ssid": display,
+            # Stable grouping key. `ssid` above stays a human-readable label and
+            # keeps the name the user's own phone shows.
+            "carrier_identity": identity,
+            "carrier_numeric": normalize_plmn(cellular.get("carrierNumeric")),
+            "carrier_name": (cellular.get("carrier") or "").strip() or None,
             "bssid": "",
             "signal_dbm": cell_dbm,
             "signal_pct": None,
@@ -540,7 +556,7 @@ def api_heatmap():
     skipped_no_signal = 0
     for s in scans:
         if s.get("lat") is not None and s.get("lon") is not None:
-            if ssid_filter and s.get("ssid", "").lower() != ssid_filter:
+            if not scan_matches(s, ssid_filter):
                 continue
             # No reading means no weight to derive. Matches prepare_points and
             # the analytics cell builder, which both skip a null signal.

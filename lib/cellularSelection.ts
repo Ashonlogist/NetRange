@@ -2,18 +2,33 @@
  * Which SIM a cellular reading should be attributed to.
  *
  * This is deliberately dependency-free (no react-native, no NetInfo) so the
- * policy can be unit tested in plain Node. The Android implementation of the
- * same order lives in
- *   modules/netrange-telephony/.../TelephonyModule.kt -> pickSubscription()
- * and must be kept in step with `pickSubscriptionId` here. Kotlin cannot run in
- * this test suite, so this file is the executable spec of the ordering; the
- * native path is covered by the EAS build plus on-device verification.
+ * policy can be unit tested in plain Node. `readCellular` calls it and passes
+ * the result to `getActiveCellularAsync` as an explicit subscription id, which
+ * makes this the order that actually ships -- the native path then returns
+ * exactly the sub chosen here, via its own pin branch.
  *
- * Why the order is bearer-first: Android's "default data subscription" is a
- * user *preference*, not a statement about which SIM is carrying traffic right
- * now. A default sub with no live bearer used to win over a sub that had one,
- * which is how a phone actually on Telecel in SIM2 kept reporting "MTN" with a
- * null signal. Never let an idle SIM outrank a live one.
+ * The native implementation of the same order lives in
+ *   modules/netrange-telephony/.../TelephonyModule.kt -> pickSubscription()
+ * and is only reached when this policy finds no sub to pin, so its ordering is
+ * a fallback rather than the deciding factor. It previously carried a
+ * bearer-first order that this file contradicted, and because nothing called
+ * this function the contradiction went unnoticed: the tests were green while
+ * the app reported the wrong carrier.
+ *
+ * Why the order is default-first, and why that reverses an earlier decision:
+ * `hasDataBearer` is derived from `dataNetworkType != UNKNOWN`, which is not a
+ * liveness signal. On a dual-SIM phone that is on WiFi -- no cellular bearer is
+ * established for any SIM -- it reports UNKNOWN for the real data SIM and a
+ * stale non-UNKNOWN value for the idle one. A bearer-first order therefore picks
+ * the *idle* SIM precisely when the phone is off cellular, and the scan is filed
+ * under a carrier the user is not on. That was measured on a TECNO KM5 on
+ * WiFi, where the OS reported defaultDataSubId=3 (Telecel, mnc 62002) and this
+ * policy returned the MTN sub instead.
+ *
+ * `getDefaultDataSubscriptionId()` has none of that fragility: it is Android's
+ * per-subscription answer to which SIM the owner configured for data, and it
+ * stays correct while WiFi is in use. So the default sub is trusted outright,
+ * and bearer state is only consulted when there is no default to trust.
  */
 
 /** The parts of a SIM this policy needs. Works for native and test fixtures. */
@@ -21,7 +36,13 @@ export interface SubscriptionLike {
   subscriptionId: number;
   /** Android's default data subscription. */
   isDefault?: boolean;
-  /** Whether this sub currently has a live data bearer. */
+  /**
+   * Whether this sub currently has a live data bearer.
+   *
+   * Advisory only, and unreliable: see the note at the top of this file. It is
+   * a tiebreaker for devices that report no default data sub, never a veto over
+   * one that does.
+   */
   hasDataBearer?: boolean;
 }
 
@@ -30,14 +51,14 @@ export interface SubscriptionLike {
  * are no SIMs to choose from.
  *
  * 1. An explicit pin wins outright -- the user chose it, no heuristic overrules.
- * 2. The default sub, if it has a live bearer.
- * 3. Any other sub with a live bearer.
- * 4. The default sub, even if idle. Nothing has a bearer at this point, so
- *    "which SIM is the OS set up for" beats "which slot is physically first".
- * 5. Whatever is there.
+ * 2. The default data sub, whatever its bearer state.
+ * 3. Failing that, any sub reporting a live bearer. Only reachable when the OS
+ *    names no default, e.g. below API 26 where the accessor does not exist.
+ * 4. Whatever is there.
  *
- * Step 3 separates from step 2 only to stay deterministic when both SIMs are
- * live; otherwise the tie would silently resolve to physical slot order.
+ * Step 2 is unconditional on purpose. Treating a bearer as authoritative here
+ * is what made an off-cellular dual-SIM phone report the wrong carrier, and a
+ * stale bearer is indistinguishable from a real one at this layer.
  */
 export function pickSubscriptionId(
   subs: readonly SubscriptionLike[],
@@ -57,14 +78,11 @@ export function pickSubscriptionId(
   const isDefault = (s: SubscriptionLike) =>
     defaultSubId != null && s.subscriptionId === defaultSubId;
 
-  const live = subs.find((s) => isDefault(s) && s.hasDataBearer);
+  const fallback = subs.find(isDefault);
+  if (fallback) return fallback.subscriptionId;
+
+  const live = subs.find((s) => s.hasDataBearer);
   if (live) return live.subscriptionId;
-
-  const otherLive = subs.find((s) => !isDefault(s) && s.hasDataBearer);
-  if (otherLive) return otherLive.subscriptionId;
-
-  const idleDefault = subs.find(isDefault);
-  if (idleDefault) return idleDefault.subscriptionId;
 
   return subs[0].subscriptionId;
 }
