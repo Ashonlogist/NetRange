@@ -14,7 +14,7 @@ import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import * as SecureStore from 'expo-secure-store';
 import { postScan } from '@/lib/deviceAuth';
-import NetInfo from '@react-native-community/netinfo';
+import { readCellular } from '@/lib/cellular';
 import { Platform } from 'react-native';
 
 export const BACKGROUND_SCAN_TASK = 'netrange-background-scan';
@@ -68,21 +68,10 @@ TaskManager.defineTask(BACKGROUND_SCAN_TASK, async () => {
       }));
     } catch {}
 
-    // Cellular
-    let cellular: any = null;
-    try {
-      const savedCarrier = await SecureStore.getItemAsync('carrierName');
-      const netInfo = await NetInfo.fetch();
-      if (netInfo.type === 'cellular') {
-        const d = netInfo.details as any;
-        cellular = {
-          carrier: savedCarrier || d.carrier || d.mobileCarrier || d.networkName || 'Cellular',
-          signalStrength: d.strength ?? d.signalStrength ?? undefined,
-          networkType: d.cellularGeneration || d.type || 'Unknown',
-          isConnected: netInfo.isConnected || false,
-        };
-      }
-    } catch {}
+    // Cellular. Same reader as the foreground path, so a background scan
+    // cannot quietly file itself under a different carrier than the app shows.
+    const savedCarrier = await SecureStore.getItemAsync('carrierName').catch(() => null);
+    const cellular: any = await readCellular(savedCarrier || undefined);
 
     // Determine target (WiFi or carrier)
     let autoTarget = '';

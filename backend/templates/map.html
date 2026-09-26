@@ -111,7 +111,6 @@
             color: var(--text-muted);
             font-weight: 400;
         }
-        #closeBtn { display: none; }
 
         /* Sidebar content */
         .sidebar-body {
@@ -552,30 +551,7 @@
                 align-items: center;
                 justify-content: center;
             }
-            #closeBtn {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                position: absolute;
-                top: 16px;
-                right: 16px;
-                width: 36px;
-                height: 36px;
-                border-radius: 50%;
-                border: 1px solid var(--glass-border);
-                background: var(--surface);
-                color: var(--text-secondary);
-                font-size: 1em;
-                cursor: pointer;
-                z-index: 10;
-                transition: all 0.2s;
-            }
-            #closeBtn:hover {
-                background: var(--surface-hover);
-                color: var(--text-primary);
-            }
             .sidebar-overlay.active { display: block; }
-            .sidebar-header { padding-right: 56px; }
         }
 
         /* ===== LOADING SPINNER ===== */
@@ -812,6 +788,47 @@
             z-index: 900;
             width: min(420px, calc(100vw - 48px));
         }
+
+        /* Inside the app the bar sat at top: 12px, hard against the status bar,
+           where it read as clipped chrome rather than a control. It now lives
+           just above the native menu button and starts collapsed to a single
+           magnifier, expanding on tap -- a full-width field permanently parked
+           over the map was stealing the top of the viewport for no reason. */
+        body.is-app .map-search {
+            top: auto;
+            bottom: 92px;
+            left: auto;
+            right: 20px;
+            transform: none;
+            width: auto;
+            max-width: calc(100vw - 40px);
+        }
+        body.is-app .map-search .search-field {
+            width: 48px;
+            height: 48px;
+            padding: 0;
+            justify-content: center;
+            border-radius: 50%;
+            overflow: hidden;
+            cursor: pointer;
+            transition: width .22s ease, height .22s ease, padding .22s ease,
+                        border-radius .22s ease;
+        }
+        body.is-app .map-search.expanded .search-field {
+            width: min(420px, calc(100vw - 40px));
+            height: auto;
+            padding: 10px 14px;
+            justify-content: flex-start;
+            border-radius: var(--radius-lg);
+            cursor: text;
+        }
+        body.is-app .map-search .search-icon { opacity: 0.85; }
+        /* The clear button and spinner only make sense once there is a field. */
+        body.is-app .map-search:not(.expanded) .search-clear,
+        body.is-app .map-search:not(.expanded) .search-spinner { display: none; }
+        /* Results open downward from the field, which now sits near the bottom
+           edge, so cap them well short of the viewport bottom. */
+        body.is-app .map-search.expanded .search-results { max-height: min(40vh, 300px); }
         .search-field {
             display: flex;
             align-items: center;
@@ -924,7 +941,6 @@
 
     <div id="sidebar">
         <div class="sidebar-header">
-            <button id="closeBtn" onclick="toggleSidebar()" aria-label="Close">&#10005;</button>
             <div class="brand">
                 <div class="brand-icon">&#128225;</div>
                 <div class="brand-text">
@@ -1116,6 +1132,9 @@
                 if (sidebar) sidebar.style.display = 'none';
                 if (menuBtn) menuBtn.style.display = 'none';
                 if (overlay) overlay.style.display = 'none';
+                // Lets CSS reposition the search without JS style-poking, and
+                // is what arms the collapsed-icon behaviour.
+                document.body.classList.add('is-app');
             });
         }
 
@@ -2032,6 +2051,44 @@
             document.addEventListener("mousedown", function(e) {
                 if (!searchWrap.contains(e.target)) closeSearch();
             });
+
+            /* Collapsed icon <-> expanded field, app build only. The icon is the
+               only thing that should open it; once open, the field is a normal
+               text input and must not steal its own clicks. */
+            if (document.body.classList.contains('is-app')) {
+                searchWrap.classList.add('collapsed');
+
+                searchWrap.querySelector('.search-field').addEventListener('click', function(e) {
+                    if (searchWrap.classList.contains('expanded')) return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    searchWrap.classList.add('expanded');
+                    try { searchInput.focus(); } catch (err) {}
+                });
+
+                var collapseSearch = function() {
+                    if (!searchWrap.classList.contains('expanded')) return;
+                    searchWrap.classList.remove('expanded');
+                    searchInput.value = '';
+                    searchInput.blur();
+                    syncHasText();
+                    closeSearch();
+                };
+
+                // Tapping the map is the dismiss gesture, consistent with the
+                // panel. Suppressed while a result is being chosen, otherwise
+                // the mousedown that selects a result would collapse the field
+                // out from under the click.
+                document.addEventListener('mousedown', function(e) {
+                    if (searchWrap.contains(e.target)) return;
+                    if (e.target.closest && e.target.closest('.leaflet-popup, .leaflet-marker-icon')) return;
+                    collapseSearch();
+                }, true);
+
+                document.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') collapseSearch();
+                });
+            }
         }
 
         if (document.readyState === 'loading') {

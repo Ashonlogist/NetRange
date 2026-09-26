@@ -15,7 +15,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import NetInfo from '@react-native-community/netinfo';
 import { WebView } from 'react-native-webview';
 import { Header, Card, Button, Input, Badge, StatRow, T } from '@/components/UI';
 import { useApp } from '@/components/Providers';
@@ -23,6 +22,7 @@ import { useUpdater } from '@/components/Updater';
 import * as SecureStore from 'expo-secure-store';
 import { registerBackgroundScan, getBackgroundScanStatus, type BackgroundScanState } from '@/lib/backgroundTask';
 import { postScan } from '@/lib/deviceAuth';
+import { readCellular, requestPhonePermission } from '@/lib/cellular';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const PANEL_H = SCREEN_H * 0.7;
@@ -38,9 +38,12 @@ interface WifiNetwork {
 
 interface CellularInfo {
   carrier: string;
-  signalStrength?: number;
+  /** Real dBm from the active SIM, or undefined when the OS withholds it. */
+  signalDbm?: number;
   networkType: string;
   isConnected: boolean;
+  simSlot?: number;
+  overridden?: boolean;
 }
 
 function signalColor(dbm: number) {
@@ -146,6 +149,7 @@ export default function HomeScreen() {
     const startTracking = async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted' || !mounted) return;
+      void requestPhonePermission();
       const sub = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, distanceInterval: 10, timeInterval: 15000 },
         (loc) => {
@@ -197,6 +201,7 @@ export default function HomeScreen() {
 
         let wifi: WifiNetwork[] = [];
         let cellular: CellularInfo | null = null;
+        const savedCarrier = await SecureStore.getItemAsync('carrierName').catch(() => null);
         try {
           const WifiManager = require('react-native-wifi-reborn').default;
           const networks = await WifiManager.loadWifiList();
@@ -211,19 +216,11 @@ export default function HomeScreen() {
           }));
         } catch {}
 
-        try {
-          const savedCarrier = await SecureStore.getItemAsync('carrierName');
-          const netInfo = await NetInfo.fetch();
-          if (netInfo.type === 'cellular') {
-            const d = netInfo.details as any;
-            cellular = {
-              carrier: savedCarrier || d.carrier || d.mobileCarrier || d.networkName || 'Cellular',
-              signalStrength: d.strength ?? d.signalStrength ?? undefined,
-              networkType: d.cellularGeneration || d.type || 'Unknown',
-              isConnected: netInfo.isConnected || false,
-            };
-          }
-        } catch {}
+        // Reads the SIM that is actually carrying data, and its real dBm. The
+        // old NetInfo path reported whichever SIM Android considered default,
+        // which on a dual-SIM handset meant scans filed under the wrong
+        // carrier, and it had no signal field at all.
+        cellular = await readCellular(carrierOverride || savedCarrier || undefined);
 
         let autoTarget = '';
         const connectedWifi = wifi.find(n => n.isConnected);
@@ -295,6 +292,7 @@ export default function HomeScreen() {
     if (Platform.OS === 'web') return;
     setScanning(true);
     setError('');
+    let cellular: CellularInfo | null = null;
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
@@ -302,6 +300,7 @@ export default function HomeScreen() {
         setScanning(false);
         return;
       }
+      void requestPhonePermission();
       let loc: Location.LocationObject;
       try {
         loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
@@ -333,20 +332,8 @@ export default function HomeScreen() {
         }
       }
 
-      let cellular: CellularInfo | null = null;
-      try {
-        const savedCarrier = await SecureStore.getItemAsync('carrierName');
-        const netInfo = await NetInfo.fetch();
-        if (netInfo.type === 'cellular') {
-          const d = netInfo.details as any;
-          cellular = {
-            carrier: savedCarrier || d.carrier || d.mobileCarrier || d.networkName || 'Cellular',
-            signalStrength: d.strength ?? d.signalStrength ?? undefined,
-            networkType: d.cellularGeneration || d.type || 'Unknown',
-            isConnected: netInfo.isConnected || false,
-          };
-        }
-      } catch {}
+      const savedCarrier = await SecureStore.getItemAsync('carrierName').catch(() => null);
+      cellular = await readCellular(carrierOverride || savedCarrier || undefined);
 
       setWifiNetworks(wifi);
       setCellularInfo(cellular);
@@ -468,6 +455,9 @@ export default function HomeScreen() {
     try {
       const meshUrl = `${apiUrl}/api/mesh?ssid=${encodeURIComponent(targetSsid)}`;
       const meshResp = await fetch(meshUrl);
+      if (!meshResp.ok) {
+        throw new Error(`Server returned ${meshResp.status} for the coverage mesh`);
+      }
       const meshData = await meshResp.json();
       if (meshData.triangles && meshData.triangles.length > 0) {
         webViewRef.current?.injectJavaScript(`
@@ -482,9 +472,23 @@ export default function HomeScreen() {
       }
       const hUrl = `${apiUrl}/api/heatmap?ssid=${encodeURIComponent(targetSsid)}`;
       const hResp = await fetch(hUrl);
+      if (!hResp.ok) {
+        throw new Error(`Server returned ${hResp.status} for the scan points`);
+      }
       const hData = await hResp.json();
       if (!hData.points || hData.points.length === 0) {
-        Alert.alert('No Data', 'No coverage data. Save scan points at different locations first.');
+        // The old message was a flat "no data", which is what you saw while
+        // every cellular scan was being stored with a null signal: the server
+        // was discarding rows the app had happily saved. Say which of the two
+        // reasons it is, so this is diagnosable instead of a dead end.
+        const skipped = hData.skipped_no_signal || 0;
+        Alert.alert(
+          'No Mappable Data',
+          skipped > 0
+            ? `${skipped} scan${skipped === 1 ? '' : 's'} saved for ${targetSsid}, but none carried a signal reading, so there is nothing to draw.\n\n` +
+              'Android only reports a cellular signal level once the Phone permission is granted. Grant it, then scan again.'
+            : `Nothing saved for "${targetSsid}" yet. Tap Save at a few different locations first.`,
+        );
         setGenerating(false);
         return;
       }
@@ -585,9 +589,15 @@ export default function HomeScreen() {
         <TouchableOpacity style={s.mapOverlay} onPress={closePanel} activeOpacity={1} />
       )}
 
-      <TouchableOpacity style={s.fab} onPress={togglePanel} activeOpacity={0.8}>
-        <Ionicons name={panelOpen ? 'close' : 'menu'} size={24} color="white" />
-      </TouchableOpacity>
+      {/* The FAB is a menu button, not a close button. It used to turn into an
+          X while the sheet was open, which sat on top of the panel and swallowed
+          taps meant for whatever was underneath it. Tapping the map closes the
+          sheet, as does the drag handle, so the X was redundant *and* harmful. */}
+      {!panelOpen && (
+        <TouchableOpacity style={s.fab} onPress={togglePanel} activeOpacity={0.8}>
+          <Ionicons name="menu" size={24} color="white" />
+        </TouchableOpacity>
+      )}
 
       {targetSsid && !panelOpen && (
         <View style={s.targetBadge}>
@@ -714,10 +724,23 @@ export default function HomeScreen() {
                           <View style={s.networkNameRow}>
                             {targetSsid === cellularInfo.carrier && <Ionicons name="checkmark-circle" size={12} color={T.green} />}
                             <Text style={[s.networkSsid, targetSsid === cellularInfo.carrier && { color: T.green }]}>{cellularInfo.carrier}</Text>
+                            {/* Which SIM this reading came from. On a dual-SIM
+                                handset the old code silently reported the other
+                                one, so this is the difference between "wrong
+                                carrier" being a mystery and being obvious. */}
+                            {cellularInfo.simSlot != null && (
+                              <Badge label={`SIM${cellularInfo.simSlot + 1}`} variant="info" />
+                            )}
+                            {cellularInfo.overridden && <Badge label="Renamed" variant="warning" />}
                             {cellularInfo.isConnected && <Badge label="Connected" variant="success" />}
                             <Ionicons name="pencil" size={10} color={T.textMuted} style={{ marginLeft: 4 }} />
                           </View>
-                          <Text style={s.networkMeta}>{cellularInfo.networkType}</Text>
+                          <Text style={s.networkMeta}>
+                            {cellularInfo.networkType}
+                            {cellularInfo.signalDbm != null
+                              ? ` · ${Math.round(cellularInfo.signalDbm)} dBm`
+                              : ' · no signal reading'}
+                          </Text>
                         </View>
                         <Badge label={cellularInfo.isConnected ? 'Online' : 'Offline'} variant={cellularInfo.isConnected ? 'success' : 'danger'} />
                       </View>

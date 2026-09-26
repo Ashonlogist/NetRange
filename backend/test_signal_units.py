@@ -89,3 +89,109 @@ class ScanDisplayFormatTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExplicitDbmTests(unittest.TestCase):
+    """`signalDbm` from TelephonyManager must not be re-guessed.
+
+    The cellular path used to send `signalStrength`, a field with no units,
+    which the server had to interpret as dBm-or-percentage. A real reading off
+    SignalStrength is unambiguous, so it is taken as-is; anything absent still
+    becomes NULL rather than an invented number.
+    """
+
+    def _post_cellular(self, cellular):
+        import app as appmod
+        c = appmod.app.test_client()
+        token = c.post("/api/register-device",
+                       json={"deviceId": "unittest-device"}).json["token"]
+        return c.post("/api/scan",
+                      json={"wifi": [], "cellular": cellular,
+                            "location": {"lat": 5.6, "lon": -0.2},
+                            "deviceId": "unittest-device"},
+                      headers={"Authorization": f"Bearer {token}"})
+
+    def setUp(self):
+        import app as appmod
+        from test_device_auth import _FakeClient
+        self.fake = _FakeClient()
+        import db
+        db._client = self.fake
+        appmod.get_client = lambda: self.fake
+        self.rows = []
+        self._real_save = appmod.save_scan
+        appmod.save_scan = lambda recs: self.rows.extend(recs) or len(recs)
+
+    def tearDown(self):
+        import app as appmod
+        appmod.save_scan = self._real_save
+
+    def test_signal_dbm_taken_verbatim(self):
+        self._post_cellular({"carrier": "Telecel", "signalDbm": -83.0,
+                             "networkType": "4G", "isConnected": True})
+        self.assertEqual(len(self.rows), 1)
+        self.assertEqual(self.rows[0]["signal_dbm"], -83.0)
+        self.assertEqual(self.rows[0]["ssid"], "Telecel")
+
+    def test_signal_dbm_zero_is_a_real_reading_not_a_missing_one(self):
+        # 0 dBm is a legitimate (if implausible) reading. A truthiness check
+        # would discard it and the scan would vanish from the map.
+        self._post_cellular({"carrier": "Telecel", "signalDbm": 0,
+                             "networkType": "4G", "isConnected": True})
+        self.assertEqual(self.rows[0]["signal_dbm"], 0.0)
+
+    def test_missing_signal_stays_null(self):
+        self._post_cellular({"carrier": "Telecel", "networkType": "4G",
+                             "isConnected": True})
+        self.assertIsNone(self.rows[0]["signal_dbm"])
+
+    def test_signal_dbm_wins_over_ambiguous_signal_strength(self):
+        self._post_cellular({"carrier": "Telecel", "signalDbm": -77,
+                             "signalStrength": 42})
+        self.assertEqual(self.rows[0]["signal_dbm"], -77.0)
+
+    def test_legacy_signal_strength_still_converted(self):
+        # Older builds send only signalStrength; a negative value is dBm.
+        self._post_cellular({"carrier": "MTN", "signalStrength": -66,
+                             "networkType": "4G", "isConnected": True})
+        self.assertEqual(self.rows[0]["signal_dbm"], -66.0)
+
+    def test_bool_is_not_a_reading(self):
+        # bool is an int subclass in Python; True must not become 1 dBm.
+        self._post_cellular({"carrier": "Telecel", "signalDbm": True})
+        self.assertIsNone(self.rows[0]["signal_dbm"])
+
+
+class HeatmapSkipReportingTests(unittest.TestCase):
+    """An empty heatmap must say *why*, not just be empty.
+
+    Every cellular scan used to be saved with a null signal, so the map was
+    always empty while the app cheerfully reported saved rows. The count of
+    dropped rows is what makes that diagnosable from the phone.
+    """
+
+    def setUp(self):
+        import app as appmod
+        self.appmod = appmod
+        self._real = appmod.load_scans
+        appmod.load_scans = lambda: [
+            {"ssid": "Telecel", "lat": 5.6, "lon": -0.2, "signal_dbm": -80},
+            {"ssid": "Telecel", "lat": 5.7, "lon": -0.3, "signal_dbm": None},
+            {"ssid": "Telecel", "lat": 5.8, "lon": -0.4, "signal_dbm": None},
+            {"ssid": "Other", "lat": 5.9, "lon": -0.5, "signal_dbm": -70},
+        ]
+
+    def tearDown(self):
+        self.appmod.load_scans = self._real
+
+    def test_reports_points_and_skipped_count(self):
+        c = self.appmod.app.test_client()
+        d = c.get("/api/heatmap?ssid=Telecel").get_json()
+        self.assertEqual(len(d["points"]), 1)
+        self.assertEqual(d["skipped_no_signal"], 2)
+
+    def test_other_targets_are_not_counted(self):
+        c = self.appmod.app.test_client()
+        d = c.get("/api/heatmap?ssid=Nothing").get_json()
+        self.assertEqual(d["points"], [])
+        self.assertEqual(d["skipped_no_signal"], 0)

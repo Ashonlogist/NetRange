@@ -57,7 +57,7 @@ app.secret_key = DASHBOARD_SECRET
 # reads it per request so the deadline passes without a redeploy. Do not cache
 # it at import time; two sources of truth for a security deadline is a trap.
 
-APP_VERSION = "1.4.3"
+APP_VERSION = "1.5.0"
 # The APK is published as a GitHub release asset, not served from this
 # service: the build output is gitignored, so a git-deployed instance can
 # never have it on disk. Override with APK_URL if hosting ever changes.
@@ -96,6 +96,13 @@ def download_file(filename):
 # heading. Keying them to the version makes that impossible: a new version with
 # no entry gets an honest fallback instead of a lie.
 RELEASE_NOTES = {
+    "1.5.0": [
+        "Carrier: reads the SIM actually in use, not Android's default one",
+        "Coverage: cellular signal is now measured, so cellular maps can be drawn",
+        "Map: search collapses to an icon and sits clear of the status bar",
+        "Panel: the close X removed, since tapping the map already closes it",
+        "Generate Map: says why a map is empty instead of just 'no data'",
+    ],
     "1.4.3": [
         "Carrier: override can be cleared again",
         "Background scanning: shows why it is not running",
@@ -373,18 +380,26 @@ def api_scan_post():
         })
 
     if cellular and isinstance(cellular, dict):
+        # signalDbm is an explicit reading from the active SIM (TelephonyManager
+        # SignalStrength) and is taken as-is. signalStrength is the older,
+        # unit-ambiguous field and still needs to_dbm() to tell a dBm from a
+        # percentage; prefer the unambiguous one whenever the app sends it.
+        signal_dbm_raw = cellular.get("signalDbm")
         signal_strength = cellular.get("signalStrength")
-        # Left as NULL when the platform gave us no reading. Substituting a
-        # plausible -70 here is what made every cellular scan look identical
-        # and produced a flat, meaningless coverage map; a NULL is skipped by
-        # the interpolator, which is the honest outcome.
-        cell_dbm = to_dbm(signal_strength)
+        if isinstance(signal_dbm_raw, (int, float)) and not isinstance(signal_dbm_raw, bool):
+            cell_dbm = float(signal_dbm_raw)
+        else:
+            # Left as NULL when the platform gave us no reading. Substituting a
+            # plausible -70 here is what made every cellular scan look identical
+            # and produced a flat, meaningless coverage map; a NULL is skipped by
+            # the interpolator, which is the honest outcome.
+            cell_dbm = to_dbm(signal_strength)
         records.append({
             "ssid": (cellular.get("carrier") or "Cellular").strip(),
             "bssid": "",
             "signal_dbm": cell_dbm,
             "signal_pct": None,
-            "strength_raw": signal_strength,
+            "strength_raw": signal_dbm_raw if signal_dbm_raw is not None else signal_strength,
             "channel": None,
             "frequency": None,
             "lat": lat,
@@ -419,6 +434,11 @@ def api_heatmap():
     scans = load_scans()
     ssid_filter = request.args.get("ssid", "").strip().lower()
     points = []
+    # Rows we are throwing away, reported back so the app can explain an empty
+    # map instead of just shrugging. Every cellular scan used to land here,
+    # because the platform gave no signal level, and the app's only message was
+    # "no data" -- indistinguishable from "you have not scanned yet".
+    skipped_no_signal = 0
     for s in scans:
         if s.get("lat") is not None and s.get("lon") is not None:
             if ssid_filter and s.get("ssid", "").lower() != ssid_filter:
@@ -426,6 +446,7 @@ def api_heatmap():
             # No reading means no weight to derive. Matches prepare_points and
             # the analytics cell builder, which both skip a null signal.
             if s.get("signal_dbm") is None:
+                skipped_no_signal += 1
                 continue
             weight = max(0.1, min(1.0, (s["signal_dbm"] + 100) / 50))
             points.append({
@@ -435,7 +456,7 @@ def api_heatmap():
                 "ssid": s.get("ssid", ""),
                 "signal_dbm": s["signal_dbm"],
             })
-    return jsonify({"points": points})
+    return jsonify({"points": points, "skipped_no_signal": skipped_no_signal})
 
 
 @app.route("/api/current", methods=["GET"])
