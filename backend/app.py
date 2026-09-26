@@ -57,7 +57,7 @@ app.secret_key = DASHBOARD_SECRET
 # reads it per request so the deadline passes without a redeploy. Do not cache
 # it at import time; two sources of truth for a security deadline is a trap.
 
-APP_VERSION = "1.4.2"
+APP_VERSION = "1.4.3"
 # The APK is published as a GitHub release asset, not served from this
 # service: the build output is gitignored, so a git-deployed instance can
 # never have it on disk. Override with APK_URL if hosting ever changes.

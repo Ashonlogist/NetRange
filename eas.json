@@ -16,6 +16,9 @@
       }
     },
     "production": {
+      "android": {
+        "buildType": "apk"
+      },
       "env": {
         "NODE_VERSION": "18"
       }
