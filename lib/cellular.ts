@@ -27,7 +27,7 @@ interface NativeSubscription {
   simSlot: number;
   carrierName: string | null;
   carrierNumeric: string | null;
-  isDataActive: boolean;
+  hasDataBearer: boolean;
   isDefault: boolean;
   signalDbm: number | null;
   networkType: string | null;
@@ -46,7 +46,7 @@ interface NativeTelephony {
     simSlot?: number;
     carrierName?: string | null;
     carrierNumeric?: string | null;
-    isDataActive?: boolean;
+    hasDataBearer?: boolean;
     isDefault?: boolean;
     signalDbm?: number | null;
     networkType?: string | null;
@@ -146,7 +146,7 @@ export async function readCellular(
           carrier: active.carrierName || '',
           signalDbm: typeof active.signalDbm === 'number' ? active.signalDbm : undefined,
           networkType: active.networkType || 'Unknown',
-          isConnected: active.isDataActive ?? false,
+          isConnected: active.hasDataBearer ?? false,
           simSlot: active.simSlot,
           subscriptionId: active.subscriptionId,
         };
