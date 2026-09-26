@@ -1,4 +1,5 @@
 import os
+from functools import wraps
 import math
 import csv
 import io
@@ -28,7 +29,60 @@ from owner_auth import (OWNER_SESSION_KEY, check_csrf, client_ip, create_owner,
                         verify_login, widget_throttled)
 
 app = Flask(__name__)
-CORS(app)
+# CORS is per-route, not global.
+#
+# CORS(app) with no configuration reflects the caller's Origin back on EVERY
+# route, which is far wider than this service needs. Only the widget endpoint is
+# genuinely meant to be called from other people's sites -- and even there the
+# server checks Origin against registered domains before accepting anything.
+#
+# Everything else (dashboard, owner area, admin) is same-origin only. Note
+# allow_credentials stays off everywhere, which is what stops a browser from
+# attaching Basic credentials or cookies to a cross-origin call in the first
+# place; the Origin allowlist is the second layer, not the only one.
+CORS(
+    app,
+    resources={
+        r"/api/widget-scan": {"origins": "*"},
+        r"/api/sms/inbound": {"origins": "*"},
+    },
+    supports_credentials=False,
+    # Without this, flask-cors reflects the caller's Origin back instead of
+    # emitting "*" even when configured with origins="*". Harmless on its own,
+    # but it made the allowlist read as more permissive than it is. Paths not
+    # named in resources get no CORS headers either way, so this is safe to set
+    # globally.
+    send_wildcard=True,
+)
+
+
+def _require_admin_header(fn):
+    """
+    Guard a state-changing route that is protected by HTTP Basic auth.
+
+    check_csrf() is session-based and cannot help here: these routes have no
+    owner session, so there is no token to compare against and the check could
+    never pass.
+
+    Basic auth alone is not enough, because a browser re-sends cached Basic
+    credentials to the same origin even from a page on another site, and an
+    owner_id is a small sequential integer. So a plain cross-site form POST
+    could otherwise approve an arbitrary account.
+
+    Requiring a custom header closes that: a form post cannot set one, and a
+    fetch() that tries triggers a CORS preflight, which fails for any origin not
+    listed above. Combined with allow_credentials=False, a cross-origin caller
+    cannot reach this at all.
+    """
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if request.headers.get("X-Netrange-Admin") != "1":
+            return jsonify({
+                "error": "Missing X-Netrange-Admin header. Required on admin "
+                         "mutations: a cross-site form post cannot set headers."
+            }), 400
+        return fn(*args, **kwargs)
+    return wrapper
 
 # Make the CSRF token available to every template. Passing it by hand meant a
 # form on a page that forgot to would render an empty value and then fail
@@ -1263,11 +1317,11 @@ def access_requests():
 
 
 @app.route("/api/access-requests/<int:req_id>", methods=["POST"])
+@_require_admin_header
 def decide_request(req_id):
     auth = _check_dashboard_auth()
     if auth:
         return auth
-    check_csrf()
     decision = (request.form.get("decision") or "").lower()
     if decision not in ("approved", "declined"):
         return jsonify({"error": "decision must be approved or declined"}), 400
@@ -1283,11 +1337,11 @@ def decide_request(req_id):
 
 
 @app.route("/api/owners/<int:owner_id>/approval", methods=["POST"])
+@_require_admin_header
 def decide_owner(owner_id):
     auth = _check_dashboard_auth()
     if auth:
         return auth
-    check_csrf()
     decision = (request.form.get("decision") or "").lower()
     if decision not in ("approved", "declined"):
         return jsonify({"error": "decision must be approved or declined"}), 400

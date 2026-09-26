@@ -495,13 +495,38 @@ class TestApprovalGate(unittest.TestCase):
 
     def test_admin_approval_routes_require_basic_auth(self):
         """A venue must not be able to approve itself."""
-        for path, data in (
-            ("/api/access-requests/1", {"decision": "approved", "csrf_token": "x"}),
-            ("/api/owners/1/approval", {"decision": "approved", "csrf_token": "x"}),
-        ):
-            r = self.c.post(path, data=data)
+        for path in ("/api/access-requests/1", "/api/owners/1/approval"):
+            r = self.c.post(path, data={"decision": "approved"},
+                            headers={"X-Netrange-Admin": "1"})
             self.assertEqual(r.status_code, 401, path)
         self.assertEqual(self.c.get("/api/access-requests").status_code, 401)
+
+    def test_admin_mutation_requires_the_custom_header(self):
+        """
+        Basic auth alone is not enough. A browser re-sends cached Basic
+        credentials to the same origin even from another site's page, and an
+        owner_id is a small sequential integer, so a plain cross-site form POST
+        would otherwise be able to approve an arbitrary account. A form cannot
+        set a custom header; a fetch() that tries gets a CORS preflight.
+        """
+        owner_auth.set_approval
+        r = self.c.post("/api/owners/1/approval", data={"decision": "approved"})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("X-Netrange-Admin", r.get_data(as_text=True))
+
+    def test_cors_is_not_global(self):
+        """
+        CORS(app) reflects the caller's Origin on every route. Only the widget
+        and SMS endpoints are meant to be cross-origin.
+        """
+        r = self.c.get("/api/version", headers={"Origin": "https://evil.net"})
+        self.assertNotIn("https://evil.net",
+                         r.headers.get("Access-Control-Allow-Origin", ""),
+                         "ordinary API routes must not reflect arbitrary origins")
+        r = self.c.get("/api/widget-scan", headers={"Origin": "https://evil.net"})
+        self.assertEqual(r.headers.get("Access-Control-Allow-Origin"), "*")
+        self.assertNotIn("true", r.headers.get("Access-Control-Allow-Credentials", ""),
+                         "credentials must never be allowed cross-origin")
 
     def test_intent_request_is_recorded_even_if_never_emailed(self):
         self.c.get("/get-access")
