@@ -119,13 +119,53 @@ def require_owner_config():
         )
 
 
+def normalize_number(number: str) -> str:
+    """
+    Reduce a phone number to one canonical form, in E.164 where possible.
+
+    This is not cosmetic. k-anonymity counts DISTINCT phone_hash values, so if
+    the same person can be hashed two different ways then one person counts as
+    two contributors -- and a cell can be published that only one real person
+    ever contributed to. That is the guarantee failing, not just a duplicate.
+
+    The formats that actually reach us: Africa's Talking sends E.164
+    ("+233201234567"), a person reading a prompt off a screen may type the local
+    form ("0201234567"), and people paste with spaces or dots in between. All
+    three are the same handset and must hash identically.
+    """
+    raw = re.sub(r"[^\d+]", "", (number or "").strip())
+    # A sign with no number is not a number; hashing it would invent a
+    # "contributor" that never existed.
+    if not re.search(r"\d", raw):
+        return ""
+    if raw.startswith("+"):
+        return raw                       # already unambiguous
+    if raw.startswith("00"):
+        return "+" + raw[2:]             # 00233... is E.164 written longhand
+    if raw.startswith("0"):
+        # Local national format. Ghana only: a bare national number is
+        # ambiguous across countries, and guessing wrong would merge two
+        # different people, which is worse than failing to merge.
+        return "+233" + raw[1:]
+    if raw.startswith("233") and len(raw) == 12:
+        return "+" + raw                 # country code, plus dropped in transit
+    # Anything else is left alone. A bare national number from another country
+    # is genuinely ambiguous, and this function does not guess: failing to merge
+    # two spellings of one person costs a duplicate session, while merging two
+    # different people would collapse a k-anonymity cell that should be withheld.
+    return raw
+
+
 def hash_phone(number: str) -> str:
     """
     Keyed digest of a phone number. See the table comment in
     db/schema_data_sources.sql for why an unsalted hash is not acceptable.
+
+    Normalized first: see normalize_number for why the same handset must not be
+    able to produce two different hashes.
     """
     require_owner_config()
-    digits = re.sub(r"[^\d+]", "", (number or "").strip())
+    digits = normalize_number(number)
     if not digits:
         return ""
     return hmac.new(
@@ -368,33 +408,6 @@ def site_for_domain_any_status(domain: str) -> dict | None:
     call this from a path that collects or attributes data."""
     resp = get_client().table("widget_sites").select("*").eq("domain", domain).limit(1).execute()
     return (resp.data or [None])[0]
-
-
-def register_site(owner_id: int, domain: str, label: str) -> tuple[dict | None, str | None]:
-    domain = normalize_domain(domain)
-    if not domain_is_valid(domain):
-        return None, "Enter a bare domain like volta.example.com (no https://, no path)."
-    label = (label or "").strip()[:80]
-    client = get_client()
-    existing = (
-        client.table("widget_sites").select("id")
-        .eq("owner_id", owner_id).eq("domain", domain).execute()
-    )
-    if existing.data:
-        if label:
-            client.table("widget_sites").update({"label": label}).eq("id", existing.data[0]["id"]).execute()
-        resp = client.table("widget_sites").select("*").eq("id", existing.data[0]["id"]).execute()
-        return (resp.data or [None])[0], None
-    try:
-        resp = client.table("widget_sites").insert({
-            "owner_id": owner_id, "domain": domain, "label": label,
-            # Explicit, not left to the column DEFAULT: registering a domain
-            # must never be mistaken for being allowed to collect from it.
-            "verification_status": "pending",
-        }).execute()
-    except Exception:
-        return None, "Could not register that domain."
-    return (resp.data or [None])[0], None
 
 
 # ---------------------------------------------------------------------------
@@ -719,3 +732,105 @@ def _owned_site(owner_id: int, site_id: int) -> dict | None:
         .eq("id", site_id).eq("owner_id", owner_id).limit(1).execute()
     )
     return (resp.data or [None])[0]
+
+
+# ---------------------------------------------------------------------------
+# Site location and carrier
+# ---------------------------------------------------------------------------
+# SMS attribution needs to know WHERE a site is. Asking a venue manager to type
+# "5.6037, -0.1870" is asking the wrong question of the wrong person -- they
+# know their venue, not their latitude. So a Maps link is accepted too, because
+# that is what a venue actually has to hand, and it removes any need for a
+# forward geocoder (which would mean forwarding a user's location text to a
+# third party, a disclosure the SMS consent prompt does not make).
+
+# Ghanaian carriers, for the picker. Free text is still accepted so a venue on a
+# reseller or a private MVNO is not stuck.
+GHANA_CARRIERS = ("MTN", "Vodafone", "Telecel", "AirtelTigo")
+
+_COORD_PAIR = re.compile(
+    r"^\s*(-?\d{1,3}(?:\.\d+)?)\s*[, ]\s*(-?\d{1,3}(?:\.\d+)?)\s*$")
+
+
+def parse_location_input(text: str) -> tuple[float | None, float | None, str | None]:
+    """
+    Read a location from whatever a venue is likely to paste.
+
+    Accepts "5.6037, -0.1870" and the common Google Maps / OpenStreetMap URL
+    shapes, because a venue has one of those and does not have coordinates.
+    Returns (lat, lon, error); a location that cannot be read is an error
+    rather than a silent None, so the venue is not left wondering why their
+    reports never arrive.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return None, None, None            # not supplied, which is allowed
+
+    m = _COORD_PAIR.match(raw)
+    if m:
+        lat, lon = float(m.group(1)), float(m.group(2))
+        if -90 <= lat <= 90 and -180 <= lon <= 180:
+            return lat, lon, None
+        return None, None, "Latitude must be -90 to 90 and longitude -180 to 180."
+
+    # The order of !3d and !4d is not consistent across Google's URL forms --
+    # /place/ emits !4d<lon>!3d<lat> -- so both orders are matched rather than
+    # assuming one. Every pattern is (lat, lon) once reordered.
+    for pat, swap in (
+        (r"@(-?\d+\.\d+),(-?\d+\.\d+)", False),            # .../@lat,lon,17z
+        (r"!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)", False),         # !3d<lat>!4d<lon>
+        (r"!4d(-?\d+\.\d+)!3d(-?\d+\.\d+)", True),          # !4d<lon>!3d<lat>
+        (r"[?&](?:q|ll|center|query|destination)=(-?\d+\.\d+)[,/](-?\d+\.\d+)", False),
+        (r"#map=\d+(?:\.\d+)?/(-?\d+\.\d+)/(-?\d+\.\d+)", False),   # OSM
+    ):
+        m = re.search(pat, raw)
+        if m:
+            a, b = float(m.group(1)), float(m.group(2))
+            lat, lon = (b, a) if swap else (a, b)
+            if -90 <= lat <= 90 and -180 <= lon <= 180:
+                return lat, lon, None
+            return None, None, "That link points outside the valid coordinate range."
+
+    if "://" in raw or "maps." in raw.lower():
+        return None, None, ("Could not read coordinates from that link. "
+                            "Paste the link, or type \"latitude, longitude\".")
+    return None, None, ("Could not read that location. Type \"latitude, longitude\", "
+                        "or paste a Google Maps link.")
+
+
+def register_site(owner_id: int, domain: str, label: str,
+                  location: str = "", carrier: str = "") -> tuple[dict | None, str | None]:
+    domain = normalize_domain(domain)
+    if not domain_is_valid(domain):
+        return None, "Enter a bare domain like volta.example.com (no https://, no path)."
+    label = (label or "").strip()[:80]
+    lat, lon, loc_error = parse_location_input(location)
+    if loc_error:
+        return None, loc_error
+    carrier_name = (carrier or "").strip()[:40] or None
+    client = get_client()
+    existing = (
+        client.table("widget_sites").select("id")
+        .eq("owner_id", owner_id).eq("domain", domain).execute()
+    )
+    if existing.data:
+        if label:
+            client.table("widget_sites").update({"label": label}).eq("id", existing.data[0]["id"]).execute()
+        resp = client.table("widget_sites").select("*").eq("id", existing.data[0]["id"]).execute()
+        return (resp.data or [None])[0], None
+    try:
+        resp = client.table("widget_sites").insert({
+            "owner_id": owner_id, "domain": domain, "label": label,
+            # Explicit, not left to the column DEFAULT: registering a domain
+            # must never be mistaken for being allowed to collect from it.
+            "verification_status": "pending",
+            "lat": lat, "lon": lon, "sms_carrier": carrier_name,
+            # Explicit rather than left to the column DEFAULT, for the same
+            # reason as verification_status: the code should say what it means,
+            # and a reader should not have to go to the schema to learn that a
+            # new site starts with SMS off.
+            "sms_reporting_enabled": False,
+        }).execute()
+    except Exception:
+        return None, "Could not register that domain."
+    return (resp.data or [None])[0], None

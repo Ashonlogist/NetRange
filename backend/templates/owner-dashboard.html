@@ -190,6 +190,24 @@ footer a{color:var(--dim)}
             <input id="d" type="text" name="domain" placeholder="volta.example.com" required>
             <label for="l">Label</label>
             <input id="l" type="text" name="label" placeholder="Volta Hall WiFi">
+
+            <label for="loc">Where is it?</label>
+            <input id="loc" type="text" name="location"
+                   placeholder="Paste a Google Maps link, or 5.6037, -0.1870">
+            <p class="faint small">Only needed if you want SMS reports. This is what
+                stops your dashboard being shown a subscriber's signal from across
+                town, or from a competitor on the same network. Leave it blank and
+                you get widget reports only.</p>
+
+            <label for="car">Mobile network you serve</label>
+            <input id="car" type="text" name="carrier" list="ghana-carriers"
+                   placeholder="MTN">
+            <datalist id="ghana-carriers">
+                {% for c in ghana_carriers %}<option value="{{ c }}">{% endfor %}
+            </datalist>
+            <p class="faint small">SMS reports are matched on operator, so this must be
+                the network your subscribers actually use.</p>
+
             <div style="margin-top:20px"><button type="submit">Register site</button></div>
         </form>
     </div>

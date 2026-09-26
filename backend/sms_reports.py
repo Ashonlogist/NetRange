@@ -86,6 +86,26 @@ def phone_hash(number: str) -> str:
 # Inbound parsing
 # --------------------------------------------------------------------------
 
+def is_inbound_message(payload: dict) -> bool:
+    """
+    True if this callback is an incoming message rather than a delivery report.
+
+    Africa's Talking posts both to the same callback URL and distinguishes them
+    with `isActive`. Without this check a delivery report -- which carries a
+    sender number and no text -- parses as an inbound message with empty text
+    and starts a junk session that then sits open for 30 minutes.
+
+    Payloads with no isActive field are treated as inbound. That is the
+    conservative direction: it is what this endpoint is for, and rejecting an
+    unlabelled payload would silently drop real reports if the account is
+    configured differently than the docs suggest.
+    """
+    flag = (payload.get("isActive") or payload.get("IsActive") or "").strip().lower()
+    if flag in ("false", "0", "no"):
+        return False
+    return True
+
+
 def parse_inbound(payload: dict) -> tuple[str | None, str | None, str | None]:
     """Extract (from_number, to_number, text) from a webhook payload."""
     out = []

@@ -1007,3 +1007,155 @@ class TestOwnerDashboardContext(unittest.TestCase):
         body = r.get_data(as_text=True)
         self.assertIn("_netrange.alpha.example.com", body)
         self.assertIn("alpha.example.com", body)
+
+
+class TestSiteLocation(unittest.TestCase):
+    """
+    A venue knows its venue, not its latitude. These tests pin the shapes a
+    venue actually has to hand -- a Maps link, or a coordinate pair -- because
+    getting this wrong does not error visibly, it just never attributes.
+    """
+
+    def test_reads_a_coordinate_pair(self):
+        for text in ("5.6037, -0.1870", "  5.6037 ,  -0.1870 ", "5.6037,-0.1870"):
+            with self.subTest(text):
+                lat, lon, err = owner_auth.parse_location_input(text)
+                self.assertIsNone(err)
+                self.assertAlmostEqual(lat, 5.6037)
+                self.assertAlmostEqual(lon, -0.1870)
+
+    def test_reads_every_map_link_shape_we_handed_out(self):
+        cases = {
+            "https://www.google.com/maps/@5.6037,-0.1870,17z": (5.6037, -0.1870),
+            "https://maps.google.com/?q=5.6037,-0.1870": (5.6037, -0.1870),
+            # /place/ emits !4d<lon> before !3d<lat>; the order is not stable
+            # across forms, so both are matched.
+            "https://www.google.com/maps/place/X/data=!3m1!4b1!4d-0.1870!3d5.6037": (5.6037, -0.1870),
+            "https://www.google.com/maps/place/X/data=!3m1!4b1!3d5.6037!4d-0.1870": (5.6037, -0.1870),
+            "https://www.openstreetmap.org/#map=17/5.6037/-0.1870": (5.6037, -0.1870),
+        }
+        for url, (want_lat, want_lon) in cases.items():
+            with self.subTest(url[:52]):
+                lat, lon, err = owner_auth.parse_location_input(url)
+                self.assertIsNone(err, err)
+                self.assertAlmostEqual(lat, want_lat)
+                self.assertAlmostEqual(lon, want_lon)
+
+    def test_blank_is_allowed_but_junk_is_an_error(self):
+        """Blank is a legitimate answer (widget-only venue). Junk must not be,
+        or the venue sits waiting for reports that can never be attributed."""
+        self.assertEqual(owner_auth.parse_location_input(""), (None, None, None))
+        self.assertEqual(owner_auth.parse_location_input(None), (None, None, None))
+        _, _, err = owner_auth.parse_location_input("Accra")
+        self.assertIsNotNone(err, "a bare place name cannot be read")
+        _, _, err = owner_auth.parse_location_input("https://example.com/nope")
+        self.assertIsNotNone(err)
+
+    def test_out_of_range_is_refused(self):
+        _, _, err = owner_auth.parse_location_input("95.0, 0.0")
+        self.assertIsNotNone(err)
+        _, _, err = owner_auth.parse_location_input("5.6, 200.0")
+        self.assertIsNotNone(err)
+
+    def test_southern_and_eastern_hemisphere_is_not_mangled(self):
+        lat, lon, err = owner_auth.parse_location_input("-33.8688, 151.2093")
+        self.assertIsNone(err)
+        self.assertAlmostEqual(lat, -33.8688)
+        self.assertAlmostEqual(lon, 151.2093)
+
+    def test_registering_stores_location_and_carrier(self):
+        fake = _Db()
+        db._client = fake
+        appmod.get_client = lambda: fake
+        oid, _ = owner_auth.create_owner("alpha", "a-long-enough-pass")
+        site, err = owner_auth.register_site(oid, "a.example.com", "A",
+                                             "https://maps.google.com/?q=5.6037,-0.1870",
+                                             "MTN")
+        self.assertIsNone(err, err)
+        self.assertAlmostEqual(site["lat"], 5.6037)
+        self.assertAlmostEqual(site["lon"], -0.1870)
+        self.assertEqual(site["sms_carrier"], "MTN")
+
+    def test_registering_with_a_bad_location_is_refused_not_stored(self):
+        fake = _Db()
+        db._client = fake
+        appmod.get_client = lambda: fake
+        oid, _ = owner_auth.create_owner("alpha", "a-long-enough-pass")
+        site, err = owner_auth.register_site(oid, "a.example.com", "A", "Accra", "MTN")
+        self.assertIsNone(site)
+        self.assertIsNotNone(err)
+        self.assertEqual(len(fake.rows("widget_sites")), 0,
+                         "a site must not be created with a location nobody can read")
+
+
+class TestSmsTogglePreconditions(unittest.TestCase):
+    """
+    SMS reporting that is on but cannot attribute anything looks exactly like
+    "we have no reports yet", which is the most expensive kind of silence.
+    """
+
+    def setUp(self):
+        self.fake = _Db()
+        db._client = self.fake
+        appmod.get_client = lambda: self.fake
+        owner_auth.OWNER_SESSION_SECRET = "test-owner-session-secret"
+        # The login limiter is module-level and keyed by address; without this
+        # the logins here get locked out once the earlier classes have used it,
+        # which surfaces as a confusing "no CSRF token on the page".
+        owner_auth._LOGIN_ATTEMPTS.clear()
+        appmod.DASHBOARD_USERNAME = "admin"
+        appmod.DASHBOARD_PASS = "admin-pw"
+        self.c = appmod.app.test_client()
+        self.oid, _ = owner_auth.create_owner("alpha", "a-long-enough-pass")
+        owner_auth.set_approval(self.oid, True, "tester")
+        self.c.post("/owner/login", data={"username": "alpha",
+                                          "password": "a-long-enough-pass"})
+        import re
+        body = self.c.get("/owner/").get_data(as_text=True)
+        self.csrf = re.search(r'name="csrf_token" value="([^"]+)"', body).group(1)
+
+    def _site(self, location="", carrier=""):
+        site, err = owner_auth.register_site(self.oid, "a.example.com", "A",
+                                             location, carrier)
+        self.assertIsNone(err, err)
+        return site
+
+    def _toggle(self, site_id, enabled="1"):
+        return self.c.post(f"/owner/sites/{site_id}/sms",
+                           data={"csrf_token": self.csrf, "enabled": enabled})
+
+    def test_cannot_enable_without_a_carrier(self):
+        site = self._site("5.6037, -0.1870", "")
+        r = self._toggle(site["id"])
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("network you serve", r.get_data(as_text=True))
+        self.assertFalse(self.fake.rows("widget_sites")[0]["sms_reporting_enabled"])
+
+    def test_cannot_enable_without_a_location(self):
+        site = self._site("", "MTN")
+        r = self._toggle(site["id"])
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("where this site is", r.get_data(as_text=True))
+        self.assertFalse(self.fake.rows("widget_sites")[0]["sms_reporting_enabled"])
+
+    def test_can_enable_with_both(self):
+        site = self._site("5.6037, -0.1870", "MTN")
+        self.assertEqual(self._toggle(site["id"]).status_code, 302)
+        self.assertTrue(self.fake.rows("widget_sites")[0]["sms_reporting_enabled"])
+
+    def test_can_always_turn_it_off(self):
+        """Turning it off must never be blocked by a missing precondition,
+        or a venue that fixed a mistake could not undo it."""
+        site = self._site("", "")
+        self._toggle(site["id"], enabled="0")
+        self.assertFalse(self.fake.rows("widget_sites")[0]["sms_reporting_enabled"])
+
+    def test_cannot_toggle_another_owners_site(self):
+        other, _ = owner_auth.create_owner("beta", "a-long-enough-pass")
+        owner_auth.set_approval(other, True, "tester")
+        site, _ = owner_auth.register_site(other, "b.example.com", "B",
+                                           "5.6037, -0.1870", "MTN")
+        r = self._toggle(site["id"])
+        self.assertEqual(r.status_code, 404)
+        self.assertFalse([s for s in self.fake.rows("widget_sites")
+                          if s["id"] == site["id"]][0]["sms_reporting_enabled"])

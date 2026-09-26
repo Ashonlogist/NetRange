@@ -27,6 +27,7 @@ from owner_auth import (OWNER_SESSION_KEY, check_csrf, client_ip, create_owner,
                         require_approval, set_approval,
                         owner_required, owner_sites, register_site, site_for_domain,
                         request_site_verification, run_site_verification,
+                        GHANA_CARRIERS, _owned_site,
                         set_site_verification, verification_txt_name,
                         verify_login, widget_throttled)
 
@@ -1339,6 +1340,41 @@ def decide_request(req_id):
     return jsonify({"ok": True, "id": req_id, "status": decision})
 
 
+@app.route("/api/integrations")
+def integrations_status():
+    """
+    What is actually wired up, for the operator.
+
+    Every one of these was previously discoverable only by reading the source,
+    which is a bad way to answer "is the SMS number live yet?". Absence is
+    reported as absence -- this never guesses, and never reports a credential
+    it has not been given.
+    """
+    auth = _check_dashboard_auth()
+    if auth:
+        return auth
+    root = request.url_root.rstrip("/")
+    return jsonify({
+        "sms": {
+            # Inbound needs no credentials, so it is live as soon as the number
+            # points here. Outbound needs a key we do not have.
+            "inbound_webhook": root + "/api/sms/inbound",
+            "inbound_ready": True,
+            "outbound_configured": bool(os.environ.get("AT_API_KEY")),
+            "shortcode": os.environ.get("AT_SHORTCODE") or None,
+            "note": ("Set AT_API_KEY and AT_SHORTCODE to send the reply SMS. "
+                     "Until then replies are generated but not delivered."),
+        },
+        "forward_geocoder": {
+            "configured": bool(os.environ.get("SMS_FORWARD_GEOCODER_URL")),
+            "note": ("Off means SMS location answers are stored as text and never "
+                     "attributed to a site, because the location is never "
+                     "resolved to coordinates."),
+        },
+        "min_contributors": analytics.MIN_DEVICES_PER_CELL,
+    })
+
+
 @app.route("/api/sites/<int:site_id>/verification", methods=["POST"])
 @_require_admin_header
 def decide_site_verification(site_id):
@@ -1433,6 +1469,7 @@ def _owner_dashboard_response(error=None, status=200):
         sites=sites,
         csrf=csrf_token(),
         error=error,
+        ghana_carriers=GHANA_CARRIERS,
         stats=owner_site_stats(sites, scans),
         min_contributors=analytics.MIN_DEVICES_PER_CELL,
         widget_js_url=request.url_root.rstrip("/") + "/widget.js",
@@ -1460,7 +1497,13 @@ def owner_dashboard():
 @require_approval
 def owner_add_site():
     check_csrf()
-    site, error = register_site(g.owner_id, request.form.get("domain"), request.form.get("label"))
+    site, error = register_site(
+        g.owner_id,
+        request.form.get("domain"),
+        request.form.get("label"),
+        request.form.get("location", ""),
+        request.form.get("carrier", ""),
+    )
     if error:
         return _owner_dashboard_response(error, 400)
     return redirect("/owner/")
@@ -1502,6 +1545,23 @@ def owner_toggle_sms(site_id):
     """
     check_csrf()
     want = request.form.get("enabled") == "1"
+
+    # Turning SMS "on" without a location or a carrier would look enabled and
+    # silently attribute nothing, which is the failure mode most likely to be
+    # mistaken for "we have no reports yet". Refuse with the reason instead.
+    if want:
+        site = _owned_site(g.owner_id, site_id)
+        if not site:
+            abort(404)
+        if not (site.get("carrier") or site.get("sms_carrier")):
+            return _owner_dashboard_response(
+                "Add the mobile network you serve before turning SMS reporting on.", 400)
+        if site.get("lat") is None or site.get("lon") is None:
+            return _owner_dashboard_response(
+                "Add where this site is before turning SMS reporting on -- without it, "
+                "reports cannot be matched to your site rather than to the whole country.",
+                400)
+
     resp = (get_client().table("widget_sites")
             .update({"sms_reporting_enabled": want})
             .eq("id", site_id)
@@ -1530,6 +1590,11 @@ def sms_inbound():
         payload = request.form.to_dict() or (request.get_json(silent=True) or {})
     except Exception:
         payload = {}
+    # Always 200, whatever happens. Africa's Talking retries any non-2xx
+    # callback, so a 400 here would have them redeliver a permanently bad
+    # payload for as long as they feel like it.
+    if not sms_reports.is_inbound_message(payload):
+        return jsonify({"status": "ignored", "reason": "delivery report"}), 200
     number, _to, text = sms_reports.parse_inbound(payload)
     if not number:
         return jsonify({"status": "ignored", "reason": "no sender"}), 200

@@ -542,3 +542,87 @@ class TestColdStart(unittest.TestCase):
         self.assertIn("1 (unusable)", reply)
         self.assertEqual(db_.rows("sms_sessions")[0]["current_step"], "quality")
         self.assertEqual(db_.rows("sms_sessions")[0]["answers"], {})
+
+
+class TestNumberNormalization(unittest.TestCase):
+    """
+    k-anonymity counts DISTINCT phone_hash values. If one handset can hash two
+    ways, one person counts as two contributors and a cell can be published that
+    only they contributed to -- the guarantee failing rather than merely
+    double-counting.
+    """
+
+    def setUp(self):
+        owner_auth.SMS_PHONE_PEPPER = "test-pepper"
+        self.pepper = "test-pepper"
+
+    def _hash(self, n):
+        return owner_auth.hash_phone(n)
+
+    def test_every_spelling_of_one_ghananumber_is_one_person(self):
+        forms = ["+233201234567", "0201234567", "+233 20 123 4567",
+                 "+233-20-123-4567", "00233201234567", "233201234567",
+                 "  0201234567  "]
+        digests = {self._hash(f) for f in forms}
+        self.assertEqual(len(digests), 1,
+                         f"one handset produced {len(digests)} identities: {digests}")
+
+    def test_different_handsets_stay_different(self):
+        self.assertNotEqual(self._hash("+233201234567"), self._hash("+233201234568"))
+
+    def test_a_country_we_do_not_assume_is_left_alone(self):
+        """Guessing a country code wrongly would merge two different people,
+        which is worse than failing to merge two spellings of one."""
+        self.assertEqual(owner_auth.normalize_number("+254711000111"), "+254711000111")
+        self.assertEqual(owner_auth.normalize_number("254711000111"), "254711000111")
+
+    def test_non_numbers_hash_to_nothing(self):
+        """A sign with no digits must not invent a contributor."""
+        for junk in ("", "   ", "abc", "+", "++", None):
+            self.assertEqual(owner_auth.normalize_number(junk), "")
+        self.assertEqual(self._hash("+"), "")
+        self.assertEqual(self._hash(""), "")
+
+    def test_the_pepper_still_applies(self):
+        """Normalizing must not weaken the keyed digest."""
+        owner_auth.SMS_PHONE_PEPPER = "pepper-a"
+        a = self._hash("+233201234567")
+        owner_auth.SMS_PHONE_PEPPER = "pepper-b"
+        self.assertNotEqual(a, self._hash("+233201234567"))
+
+
+class TestDeliveryReportsAreNotInbound(unittest.TestCase):
+    """
+    Africa's Talking posts delivery reports to the same callback URL and marks
+    them isActive=false. They carry a sender number and no text, so without the
+    check they parse as an inbound message with empty text and open a junk
+    session that then sits for 30 minutes.
+    """
+
+    DELIVERY = {
+        "isActive": "false", "from": "+233201234567", "to": "21515",
+        "id": "ATXid_y", "date": "2026-01-01+10:00:00", "status": "Sent",
+        "networkCode": "GH01",
+    }
+    INBOUND = {
+        "isActive": "true", "from": "+233201234567", "to": "21515",
+        "id": "ATXid_x", "date": "2026-01-01+10:00:00", "text": "7",
+    }
+
+    def test_delivery_report_is_rejected(self):
+        self.assertFalse(sms_reports.is_inbound_message(self.DELIVERY))
+
+    def test_inbound_is_accepted(self):
+        self.assertTrue(sms_reports.is_inbound_message(self.INBOUND))
+
+    def test_absent_flag_is_treated_as_inbound(self):
+        """The conservative direction: this endpoint exists for inbound, and
+        rejecting an unlabelled payload would drop real reports."""
+        self.assertTrue(sms_reports.is_inbound_message({"from": "+233201234567",
+                                                        "text": "7"}))
+
+    def test_flag_spellings(self):
+        for v in ("false", "False", "FALSE", "0", "no"):
+            self.assertFalse(sms_reports.is_inbound_message({"isActive": v}), v)
+        for v in ("true", "True", "1", "yes", ""):
+            self.assertTrue(sms_reports.is_inbound_message({"isActive": v}), v)
