@@ -62,7 +62,9 @@ GENDER_STEPS_HINT = 'Reply with m, f, or "skip" (optional).'
 PROMPTS = {
     "quality": "NetRange coverage report. On a scale of 1 (unusable) to 10 (excellent), how is your network right now? Reply with a number 1-10.",
     "carrier": "Which network is this about? Reply with your carrier name (for example MTN, Telecel, AirtelTigo).",
-    "location": "Where are you? Reply with an area or landmark, for example \"Kanda\". This is geocoded to a map cell, not shared as text.",
+    "location": ("Where are you? Reply with an area or landmark, for example "
+                 "\"Cantonments\" or \"KNUST\". This is geocoded to a map "
+                 "cell, not shared as text."),
     "gender": "Optional: your gender, m or f. Reply \"skip\" to leave this blank. (" + GENDER_STEPS_HINT + ")",
     "frustration": "Last one: how frustrated are you with the service today, 1 (not at all) to 10 (very)?",
 }
@@ -356,21 +358,29 @@ def attribute_site(client, carrier: str | None, lat=None, lon=None):
 
 def geocode_free_text(text: str) -> tuple[float | None, float | None]:
     """
-    Turn "Kanda" into coordinates. Returns (None, None) unless an operator has
-    explicitly configured a forward geocoder.
+    Turn "Cantonments" into coordinates.
 
-    NOTE: backend/geocoding.py CANNOT do this. It is a reverse geocoder -- a
-    static offline table mapping lat/lon rectangles to Ghanaian place names --
-    so given text it has nothing to return. It is the wrong tool for this
-    direction, not merely insufficient.
+    Two paths, in order:
 
-    So a forward geocoder is opt-in via SMS_FORWARD_GEOCODER_URL, defaulting to
-    OFF. That default is deliberate: forwarding a person's free-text location
-    to a third-party geocoding API is an extra disclosure of that person's
-    location to another company, which the consent prompt does not mention. If
-    you enable it, the URL receives the raw text. Without it we store the text
-    and the report is still usable for carrier/frustration aggregates.
+    1. The offline table in geocoding.py, read backwards. No network call, no
+       third party, no new disclosure -- a person naming a neighbourhood is
+       naming a place, not a position, and the result is only ever used to pick
+       the cell a report falls into.
+    2. SMS_FORWARD_GEOCODER_URL, if an operator has explicitly set one. This
+       sends the raw text to a third party, which is a disclosure the SMS
+       consent prompt does not make, so it stays OFF by default and the offline
+       table is what makes the feature usable without it.
+
+    Returns (None, None) for anything unrecognised, and the caller stores the
+    raw text regardless -- so the report still feeds carrier and frustration
+    aggregates even when it cannot be placed.
     """
+    import geocoding
+
+    hit = geocoding.forward_geocode(text)
+    if hit != (None, None):
+        return hit
+
     url = os.environ.get("SMS_FORWARD_GEOCODER_URL")
     if not url or not text:
         return None, None
@@ -385,7 +395,6 @@ def geocode_free_text(text: str) -> tuple[float | None, float | None]:
             return float(lat), float(lon)
     except Exception:
         pass
-    # Fall back to raw text -- the caller stores location_text regardless.
     return None, None
 
 

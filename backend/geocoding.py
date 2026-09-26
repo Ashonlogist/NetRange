@@ -82,3 +82,86 @@ def reverse_geocode_cells(cells):
     for c in cells:
         c["location_name"] = reverse_geocode(c.get("lat"), c.get("lon"))
     return cells
+
+
+def _forward_index():
+    """
+    name -> centroid, built once from the same rectangles reverse_geocode uses.
+
+    "Teshie / Nungua" and "Kasoa (East)" also register under their first and
+    last component, because that is how someone actually types them, and a
+    lookup that misses on a spelling variant is worse than useless here: the
+    report is silently unattributed.
+    """
+    idx = {}
+    for min_lat, max_lat, min_lon, max_lon, name in _GHANA_PLACES:
+        centroid = ((min_lat + max_lat) / 2.0, (min_lon + max_lon) / 2.0)
+        for key in {name.lower(), *name.lower().replace("(", " ").replace(")", " ").split("/")}:
+            key = " ".join(key.split())
+            if key and key not in idx:
+                idx[key] = centroid
+    return idx
+
+
+# Abbreviations and the names people actually type. Aliases only -- no new
+# rectangles are added, because _GHANA_PLACES is also read forwards by
+# reverse_geocode and a new rectangle would relabel coordinates that are
+# already published on the map.
+_PLACE_ALIASES = {
+    "knust": "KNUST Campus",
+    "knust campus": "KNUST Campus",
+    "ug": "University of Ghana Campus",
+    "university of ghana": "University of Ghana Campus",
+    "university of ghana campus": "University of Ghana Campus",
+    "legon": "Legon",
+    "east legon": "East Legon",
+    "kumasai": "Kumasi Adum",
+    "kejetia": "Kumasi Kejetia",
+    "takoradi market": "Takoradi Market",
+    "cape coast": "Cape Coast",
+    "airport residential": "Airport Residential Area",
+    "airport residential area": "Airport Residential Area",
+    "tema": "Tema Community 1",
+    " university of cape coast": "University of Cape Coast",
+    "ucc": "University of Cape Coast",
+}
+
+
+_FORWARD = _forward_index()
+for _alias, _canonical in _PLACE_ALIASES.items():
+    _hit = _forward_index().get(_canonical.lower())
+    if _hit:
+        _FORWARD[_alias] = _hit
+
+
+def forward_geocode(text):
+    """
+    Resolve a place name a person typed to coordinates, using the same offline
+    table read backwards.
+
+    This exists so SMS location answers can be attributed WITHOUT calling a
+    third-party geocoder. Forwarding someone's free-text location to an external
+    API is a disclosure the SMS consent prompt does not make, which is why
+    SMS_FORWARD_GEOCODER_URL stays opt-in and off by default. A person naming a
+    neighbourhood or campus is naming a place, not a precise position: the
+    result is a neighbourhood centroid, and it is only ever used to decide which
+    cell a report falls in, never published as the person's location.
+
+    A name not in the table returns None, and the report then feeds the
+    carrier/frustration aggregates without being attributed to a site. That is
+    the safe direction.
+    """
+    if not text:
+        return None, None
+    key = " ".join(str(text).lower().replace(".", " ").split())
+    if not key:
+        return None, None
+    hit = _FORWARD.get(key)
+    if hit:
+        return hit
+    # "near Kanda", "at KNUST", "Kanda area" -- strip the filler people add.
+    stripped = " ".join(w for w in key.split()
+                        if w not in ("near", "at", "in", "around", "area",
+                                     "the", "my", "location", "is"))
+    hit = _FORWARD.get(stripped)
+    return hit if hit else (None, None)

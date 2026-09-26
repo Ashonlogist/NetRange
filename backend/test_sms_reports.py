@@ -18,6 +18,7 @@ filters. A stub that ignored filters would let every one of these pass for the
 wrong reason, which is the trap test_device_auth.py already documents.
 """
 
+import os
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -626,3 +627,99 @@ class TestDeliveryReportsAreNotInbound(unittest.TestCase):
             self.assertFalse(sms_reports.is_inbound_message({"isActive": v}), v)
         for v in ("true", "True", "1", "yes", ""):
             self.assertTrue(sms_reports.is_inbound_message({"isActive": v}), v)
+
+
+class TestOfflineForwardGeocoding(unittest.TestCase):
+    """
+    SMS location answers have to become coordinates for attribution to be
+    reachable at all. The offline table is read backwards so this works with no
+    third-party call -- forwarding a person's free-text location to an external
+    geocoder is a disclosure the SMS consent prompt never makes.
+    """
+
+    def test_a_place_name_resolves(self):
+        for name in ("Cantonments", "Madina", "East Legon", "Takoradi Market",
+                     "Cape Coast", "Ho", "Kumasi Adum"):
+            lat, lon = sms_reports.geocode_free_text(name)
+            self.assertIsNotNone(lat, name)
+            self.assertIsNotNone(lon, name)
+
+    def test_every_example_the_prompt_gives_the_user_actually_resolves(self):
+        """
+        The prompt used to suggest "Kanda", which is not in the table, so the
+        one word the user was told to copy was the one word that failed.
+        """
+        import re
+        prompt = sms_reports.PROMPTS["location"]
+        examples = re.findall(r'"([A-Za-z ]+)"', prompt)
+        self.assertTrue(examples, "prompt should offer examples")
+        for example in examples:
+            lat, lon = sms_reports.geocode_free_text(example)
+            self.assertIsNotNone(lat, f"prompt suggests {example!r}, which does not resolve")
+            self.assertIsNotNone(lon, f"prompt suggests {example!r}, which does not resolve")
+
+    def test_common_spellings_and_abbreviations_resolve(self):
+        for alias, expected in (("knust", "KNUST Campus"),
+                                ("university of ghana", "University of Ghana Campus"),
+                                ("near Madina", "Madina"),
+                                ("  East Legon  ", "East Legon")):
+            self.assertNotEqual(sms_reports.geocode_free_text(alias), (None, None), alias)
+
+    def test_case_and_spacing_do_not_matter(self):
+        a = sms_reports.geocode_free_text("Cantonments")
+        b = sms_reports.geocode_free_text("  cantonments ")
+        self.assertEqual(a, b)
+
+    def test_a_component_of_a_slash_name_resolves(self):
+        """"Teshie / Nungua" is how the table spells it, but people type one
+        half of it."""
+        for half in ("Teshie / Nungua", "Nungua"):
+            self.assertNotEqual(sms_reports.geocode_free_text(half), (None, None), half)
+
+    def test_an_unknown_place_resolves_to_nothing_rather_than_guessing(self):
+        for junk in ("Nowhereville", "asdfgh", "", None, "   "):
+            self.assertEqual(sms_reports.geocode_free_text(junk), (None, None), repr(junk))
+
+    def test_no_request_is_made_when_the_offline_table_answers(self):
+        """
+        The privacy property: a recognisable place must not leave the process.
+        """
+        calls = []
+        import requests
+        original = requests.get
+        requests.get = lambda *a, **k: calls.append(a) or original(*a, **k)
+        try:
+            sms_reports.geocode_free_text("Cantonments")
+        finally:
+            requests.get = original
+        self.assertEqual(calls, [])
+
+    def test_a_recognised_place_needs_no_configured_geocoder(self):
+        """The feature must work with SMS_FORWARD_GEOCODER_URL unset."""
+        saved = os.environ.pop("SMS_FORWARD_GEOCODER_URL", None)
+        try:
+            self.assertNotEqual(sms_reports.geocode_free_text("KNUST"), (None, None))
+        finally:
+            if saved is not None:
+                os.environ["SMS_FORWARD_GEOCODER_URL"] = saved
+
+    def test_the_result_lands_in_a_cell_the_reverse_geocoder_recognises(self):
+        """Whatever we resolve to has to be somewhere sane, not (0, 0)."""
+        import geocoding
+        for name in ("Cantonments", "KNUST", "Takoradi Market"):
+            lat, lon = sms_reports.geocode_free_text(name)
+            self.assertIsNotNone(geocoding.reverse_geocode(lat, lon),
+                                 f"{name} resolved outside the known table")
+
+    def test_aliases_do_not_relabel_published_map_coordinates(self):
+        """
+        _GHANA_PLACES is read both ways. Adding rectangles to help forward
+        lookups would silently rename locations already shown on the map, so
+        aliases were added to the name index only and no rectangle was touched.
+        """
+        import geocoding
+        original = list(geocoding._GHANA_PLACES)
+        self.assertEqual(len(original), len(geocoding._GHANA_PLACES))
+        # A point in the KNUST rectangle still labels as whatever it did before,
+        # i.e. the table is unchanged, not re-ordered around a new entry.
+        self.assertEqual(geocoding.reverse_geocode(6.66, -1.60), "Kumasi Adum")
