@@ -651,13 +651,13 @@ class TestDomainVerification(unittest.TestCase):
 
     # --- DNS lookup -------------------------------------------------------
 
-    def _dns_returns(self, answers, ok=True):
-        def fake_get(url, params=None, timeout=None):
+    def _dns_returns(self, answers, ok=True, status=0):
+        def fake_get(url, params=None, timeout=None, headers=None):
             if not ok:
                 raise OSError("resolver unreachable")
             return type("R", (), {
                 "status_code": 200,
-                "json": lambda s: {"Status": 0, "Answer": answers},
+                "json": lambda s: {"Status": status, "Answer": answers},
             })()
         return fake_get
 
@@ -665,9 +665,11 @@ class TestDomainVerification(unittest.TestCase):
         sid = self._site()["id"]
         site, _ = owner_auth.request_site_verification(self.oid, sid)
         token = site["verification_token"]
+        # Both real resolvers are covered: Cloudflare quotes, Google does not.
         owner_auth.requests.get = self._dns_returns(
             [{"name": "_netrange.alpha.example.com", "type": 16,
               "data": f'"{token}"'}])
+        self._dns_quoted = True
         got, err = owner_auth.run_site_verification(self.oid, sid)
         self.assertIsNone(err)
         self.assertEqual(got["verification_status"], "verified")
@@ -718,14 +720,85 @@ class TestDomainVerification(unittest.TestCase):
         owner_auth.request_site_verification(self.oid, sid)
         calls = []
 
-        def counting_get(url, params=None, timeout=None):
-            calls.append(1)
+        def counting_get(url, params=None, timeout=None, headers=None):
+            calls.append(url)
             return type("R", (), {"status_code": 200,
-                                  "json": lambda s: {"Answer": []}})()
+                                  "json": lambda s: {"Status": 0, "Answer": []}})()
         owner_auth.requests.get = counting_get
         owner_auth.run_site_verification(self.oid, sid)
         owner_auth.run_site_verification(self.oid, sid)
         self.assertEqual(len(calls), 1, "the second check should be refused locally")
+        self.assertEqual(len(set(calls)), 1, "one attempt must not fan out to both")
+
+    def test_both_resolver_formats_verify(self):
+        """
+        Resolvers disagree on TXT formatting, and the bug is silent: the parse
+        yields nothing, check_dns_txt returns False, and every venue is told to
+        wait for a record it already published. Found by querying a real
+        _dmarc record, not by a mock.
+        """
+        sid = self._site()["id"]
+        token = self._site_token(self.oid, sid)
+        for label, data in (("cloudflare, quoted", f'"{token}"'),
+                            ("google, bare", token),
+                            ("cloudflare, split", f'"{token[:10]}" "{token[10:]}"')):
+            with self.subTest(label):
+                owner_auth.requests.get = self._dns_returns(
+                    [{"name": "_netrange.alpha.example.com", "type": 16, "data": data}])
+                got, err = owner_auth.run_site_verification(self.oid, sid)
+                self.assertIsNone(err, f"{label} should have verified: {err}")
+                self.assertEqual(got["verification_status"], "verified")
+
+    def test_a_valid_no_match_does_not_fan_out(self):
+        """A real answer saying 'no such record' is authoritative. Consulting a
+        second resolver would double resolver load on the common case."""
+        calls = []
+
+        def counting_get(url, params=None, timeout=None, headers=None):
+            calls.append(url)
+            return type("R", (), {"status_code": 200,
+                                  "json": lambda s: {"Status": 3, "Answer": []}})()
+        sid = self._site()["id"]
+        self._site_token(self.oid, sid)
+        owner_auth.requests.get = counting_get
+        _, err = owner_auth.run_site_verification(self.oid, sid)
+        self.assertIsNotNone(err)
+        self.assertEqual(len(calls), 1, "NXDOMAIN is an answer, not a failure")
+
+    def test_a_failed_query_does_fall_over(self):
+        """SERVFAIL is not an answer, so the second resolver gets a turn -- and
+        here it succeeds, which is the behaviour that matters."""
+        sid = self._site()["id"]
+        token = self._site_token(self.oid, sid)
+        seen = []
+
+        def flaky_get(url, params=None, timeout=None, headers=None):
+            seen.append(url)
+            if len(seen) == 1:
+                return type("R", (), {
+                    "status_code": 200,
+                    "json": lambda s: {"Status": 2, "Answer": []}})()
+            return type("R", (), {
+                "status_code": 200,
+                "json": lambda s: {"Status": 0, "Answer": [
+                    {"type": 16, "data": f'"{token}"'}]}})()
+
+        owner_auth.requests.get = flaky_get
+        got, err = owner_auth.run_site_verification(self.oid, sid)
+        self.assertGreaterEqual(len(seen), 2, "should have tried the second resolver")
+        self.assertIsNone(err, err)
+        self.assertEqual(got["verification_status"], "verified")
+
+    def test_both_resolvers_failing_is_not_a_pass(self):
+        def dead_get(url, params=None, timeout=None, headers=None):
+            raise OSError("resolver unreachable")
+        sid = self._site()["id"]
+        self._site_token(self.oid, sid)
+        owner_auth.requests.get = dead_get
+        _, err = owner_auth.run_site_verification(self.oid, sid)
+        self.assertIsNotNone(err)
+        self.assertEqual(self.fake.rows("widget_sites")[0]["verification_status"],
+                         "pending")
 
     # --- scoping ----------------------------------------------------------
 

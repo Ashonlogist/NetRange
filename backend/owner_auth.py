@@ -550,38 +550,78 @@ def new_verification_token() -> str:
     return secrets.token_urlsafe(24)
 
 
+def _txt_strings(data: str) -> list[str]:
+    """
+    Reduce one TXT record to the string value it publishes.
+
+    Resolvers disagree on formatting and getting this wrong means verification
+    silently never succeeds:
+
+      * Google's JSON API returns the text bare -- v=spf1 include:_spf.x ~all
+      * Cloudflare's wraps it in quotes -- "v=spf1 include:_spf.x ~all"
+      * a record long enough to exceed 255 bytes is split into several
+        character-strings, which Cloudflare renders as "part one" "part two"
+
+    Per RFC 1035 the segments of a single record concatenate, so all three
+    shapes have to reduce to the same value.
+    """
+    quoted = re.findall(r'"((?:[^"\\]|\\.)*)"', data)
+    if quoted:
+        joined = "".join(quoted)
+        return [re.sub(r"\\(.)", r"\1", joined)]
+    return [data.strip()]
+
+
+# Status 3 is NXDOMAIN: a valid answer meaning "no such name". Status 0 is a
+# valid answer. Anything else (SERVFAIL, REFUSED, an unparseable body) is a
+# failed query, and failing over on those -- but never on a real no-match --
+# keeps a second resolver from doubling load on the common case.
+_DOH_VALID_STATUS = (0, 3)
+_DOH_RESOLVERS = (
+    "https://dns.google/resolve",
+    "https://cloudflare-dns.com/dns-query",
+)
+
+
 def check_dns_txt(name: str, token: str) -> bool:
     """
     True if `name` publishes a TXT record containing `token`.
 
-    Returns False on ANY error -- resolver down, malformed JSON, timeout. The
-    caller treats False as "not verified yet" and says so; it must never be
-    read as "verified".
+    Returns False on ANY error -- resolver down, malformed JSON, timeout, a
+    malformed name. The caller reads False as "not verified yet" and says so, so
+    it must never be mistaken for "verified".
     """
     # "_" is legal in a DNS label and our own prefix uses it, so excluding it
     # here would reject every name this function generates.
     if not re.fullmatch(r"[a-z0-9_.-]{1,253}", name or ""):
         return False
-    try:
-        resp = requests.get(
-            _DOH_ENDPOINT,
-            params={"name": name, "type": "TXT", "cd": "false"},
-            timeout=5,
-        )
-        if resp.status_code != 200:
-            return False
-        answers = (resp.json() or {}).get("Answer") or []
-    except Exception:
-        # A resolver we cannot reach is a failed check, not a pass.
-        return False
 
-    for a in answers:
-        if not isinstance(a, dict) or a.get("type") != 16:
+    for endpoint in _DOH_RESOLVERS:
+        try:
+            resp = requests.get(
+                endpoint,
+                params={"name": name, "type": "TXT"},
+                headers={"accept": "application/dns-json"},
+                timeout=5,
+            )
+            if resp.status_code != 200:
+                continue
+            body = resp.json()
+        except Exception:
             continue
-        for chunk in re.findall(r'"((?:[^"\\]|\\.)*)"', str(a.get("data", ""))):
-            if hmac.compare_digest(chunk.strip(), token):
-                return True
-    return False
+
+        if body.get("Status") not in _DOH_VALID_STATUS:
+            continue        # failed query; the next resolver may still answer
+
+        for a in body.get("Answer") or []:
+            if not isinstance(a, dict) or a.get("type") != 16:
+                continue   # an A record is not proof of control
+            for value in _txt_strings(str(a.get("data", ""))):
+                if hmac.compare_digest(value.strip(), token):
+                    return True
+        return False        # a valid answer with no match is authoritative
+
+    return False            # every resolver failed: not verified
 
 
 def request_site_verification(owner_id: int, site_id: int) -> tuple[dict | None, str | None]:

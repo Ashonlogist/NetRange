@@ -334,11 +334,21 @@ being made. A fixed child name is used even for an apex domain, so the
 instruction is uniform and the token never lands in the record a domain's
 SPF/DKIM policy lives in.
 
-The resolver is **DNS-over-HTTPS** (`dns.google/resolve`), not UDP/53: cloud
-PaaS commonly blocks outbound port 53, and DoH needs no new dependency. A
-resolver that is unreachable, slow, or returns anything unparseable is a
-**failed** check, never a pass. A non-TXT answer is never a pass either — an A
-record matching the token proves nothing.
+The resolver is **DNS-over-HTTPS**, not UDP/53: cloud PaaS commonly blocks
+outbound port 53, and DoH needs no new dependency. Two resolvers are configured
+(Google and Cloudflare) and they **format TXT records differently** — Google
+returns the text bare, Cloudflare wraps it in quotes, and a record long enough
+to exceed 255 bytes arrives as several quoted character-strings that must be
+concatenated per RFC 1035. `_txt_strings()` reduces all three shapes to one
+value. This is not theoretical: parsing only the quoted form made every
+verification fail silently, and it was found by querying a real `_dmarc`
+record rather than by a mock.
+
+A resolver that is unreachable, times out, or returns an unparseable body is a
+**failed** check, never a pass, and the second resolver is tried. A *valid*
+answer of `NXDOMAIN` is authoritative and is not retried, so the common
+"nothing published yet" case does not fan out. A non-TXT answer is never a
+pass — an A record whose data happens to equal the token proves nothing.
 
 **Where it is enforced.** `site_for_domain()` filters on
 `verification_status = 'verified'` and is the only lookup the widget endpoint
