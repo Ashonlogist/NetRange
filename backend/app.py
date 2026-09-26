@@ -147,7 +147,7 @@ app.secret_key = OWNER_SESSION_SECRET
 # reads it per request so the deadline passes without a redeploy. Do not cache
 # it at import time; two sources of truth for a security deadline is a trap.
 
-APP_VERSION = "1.5.2"
+APP_VERSION = "1.5.3"
 # The APK is published as a GitHub release asset, not served from this
 # service: the build output is gitignored, so a git-deployed instance can
 # never have it on disk. Override with APK_URL if hosting ever changes.
@@ -186,6 +186,14 @@ def download_file(filename):
 # heading. Keying them to the version makes that impossible: a new version with
 # no entry gets an honest fallback instead of a lie.
 RELEASE_NOTES = {
+    "1.5.3": [
+        "Carrier: each scan now records the SIM's carrier identity and PLMN, so results are attributed to the SIM and not just the tower",
+        "Carrier: Ghana PLMNs are recognised (62001 MTN, 62002 Telecel, 62003/62006 AT, 62004 Expresso, 62007 Globacom, 62010 Blu)",
+        "Settings: shows the detected carrier and its PLMN, and says when a carrier is your manual override",
+        "Filters: a carrier can be matched by name or by PLMN, and capitalisation and stray spaces no longer matter",
+        "Signal: the app now reads cell info from the Android default data subscription, which is what allows a real dBm reading where one was previously blank",
+        "Signal: a SIM you pinned is still honoured, including when a reading has to be retried",
+    ],
     "1.5.2": [
         "Update check: this build reports its own version, so an update you have actually installed is no longer reported as the latest one",
         "Update check: the download link works again, which had stopped resolving after the repository became private",
