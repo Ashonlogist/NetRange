@@ -43,7 +43,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from db import get_client
-from analytics import MIN_DEVICES_PER_CELL, _cell_id
+from analytics import DEFAULT_CELL_SIZE_M, MIN_DEVICES_PER_CELL, _cell_id
 from owner_auth import hash_phone
 
 SESSION_TIMEOUT_MINUTES = 30
@@ -276,7 +276,8 @@ def handle_inbound(number: str, text: str, client=None) -> str:
         }).eq("phone_hash", phash).execute()
         return PROMPTS[nxt]
 
-    site_id = attribute_site(client, answers.get("carrier"))
+    site_id = attribute_site(client, answers.get("carrier"),
+                             answers.get("lat"), answers.get("lon"))
     client.table("sms_sessions").delete().eq("phone_hash", phash).execute()
     save_report(client, phash, answers, site_id)
     return (
@@ -289,34 +290,46 @@ def handle_inbound(number: str, text: str, client=None) -> str:
 # Attribution + geocoding
 # --------------------------------------------------------------------------
 
-def attribute_site(client, carrier: str | None):
+def attribute_site(client, carrier: str | None, lat=None, lon=None):
     """
     Which opted-in site does this report belong to?
 
-    An exact carrier match against widget_sites.sms_carrier, and only to a site
-    whose owner set sms_reporting_enabled. Otherwise None.
+    Returns None unless it can be tied to a specific place.
 
-    Returning None is the safe default and the common case: the report still
-    feeds the general aggregate, but stays invisible to every individual owner.
-    We never attach a complaint to a venue's dashboard on a guess -- matching
-    "the carrier matches" is the only link available, and a guess here would
-    hand one business a view of what people said about a different business's
-    service area.
+    Earlier this matched on carrier name alone. That was wrong in a way the
+    docstring here used to warn about while doing it anyway: a venue registering
+    "MTN" would have been handed every MTN report in the country -- its
+    competitors' venues, and every road outside its own walls -- presented on
+    its dashboard as its own. Carrier is not a location.
+
+    So a report is attributed only when it has coordinates that fall inside the
+    site we already know about, and the carrier matches too. A report with no
+    location, or one whose location no registered site covers, returns None and
+    feeds the general aggregate only. Under-attributing is the safe direction:
+    the cost is a quieter dashboard, not a competitor's complaints on your wall.
     """
-    if not carrier:
+    if not carrier or lat is None or lon is None:
         return None
     want = _norm_carrier(carrier)
     if not want:
         return None
     resp = (
         client.table("widget_sites")
-        .select("id,sms_carrier")
+        .select("id,sms_carrier,lat,lon")
         .eq("sms_reporting_enabled", True)
         .execute()
     )
     for site in resp.data or []:
         site_carrier = (site.get("sms_carrier") or "").strip()
-        if site_carrier and _norm_carrier(site_carrier) == want:
+        if not site_carrier or _norm_carrier(site_carrier) != want:
+            continue
+        site_lat, site_lon = site.get("lat"), site.get("lon")
+        if site_lat is None or site_lon is None:
+            # Registered without a location we can test against. Refuse rather
+            # than guess; a wrong guess here is the exact leak this guards.
+            continue
+        if (_cell_id(float(lat), float(lon), DEFAULT_CELL_SIZE_M)[0]
+                == _cell_id(float(site_lat), float(site_lon), DEFAULT_CELL_SIZE_M)[0]):
             return site["id"]
     return None
 

@@ -41,6 +41,20 @@ class OwnerAccountTests(unittest.TestCase):
         owner_auth._LOGIN_ATTEMPTS.clear()
         self.client = appmod.app.test_client()
 
+    def _approve(self, username="volta"):
+        """
+        Mark an account approved.
+
+        Most of these tests are about owner scoping and CSRF, not about the
+        approval gate (which TestApprovalGate covers). Without approval they
+        would all stop at the gate with a 403 and pass for the wrong reason, so
+        they approve first and go on to test what they were written for.
+        """
+        rows = [o for o in self.fake.rows("network_owners") if o["username"] == username]
+        if rows:
+            owner_auth.set_approval(rows[0]["id"], True, "tester")
+        return rows[0]["id"] if rows else None
+
     # --- registration ----------------------------------------------------
 
     def test_registration_creates_a_hashed_password(self):
@@ -124,6 +138,7 @@ class OwnerAccountTests(unittest.TestCase):
         a, _ = owner_auth.create_owner("alpha", "a-long-enough-pass")
         b, _ = owner_auth.create_owner("beta", "a-long-enough-pass")
         site, _ = owner_auth.register_site(b, "beta.example.com", "Beta")
+        self._approve("alpha")
         self.client.post("/owner/login", data={"username": "alpha",
                                                "password": "a-long-enough-pass"})
         # Load the dashboard, which is what mints a CSRF token into the session.
@@ -166,6 +181,7 @@ class OwnerAccountTests(unittest.TestCase):
         site_b, _ = owner_auth.register_site(b, "beta.example.com", "Beta")
 
         for user, own, foreign in (("alpha", site_a, site_b), ("beta", site_b, site_a)):
+            self._approve(user)
             c = appmod.app.test_client()
             c.post("/owner/login", data={"username": user,
                                          "password": "a-long-enough-pass"})
@@ -179,6 +195,7 @@ class OwnerAccountTests(unittest.TestCase):
 
     def test_state_change_without_csrf_is_rejected(self):
         owner_auth.create_owner("alpha", "a-long-enough-pass")
+        self._approve("alpha")
         self.client.post("/owner/login", data={"username": "alpha",
                                                "password": "a-long-enough-pass"})
         r = self.client.post("/owner/sites", data={"domain": "x.example.com"})
@@ -398,3 +415,108 @@ class TestConsentCopy(unittest.TestCase):
         decline_body = code[decline_at:decline_at + 220]
         for banned in ("collectAndSend", "send(", "fetch", "beacon"):
             self.assertNotIn(banned, decline_body)
+
+
+# --------------------------------------------------------------------------
+# Venue approval gate.
+#
+# Coverage reporting is not self-serve: a venue requests it, a person decides,
+# and free-vs-billed depends on the scale of the network. These tests pin that
+# the decision cannot be skipped by simply registering an account.
+# --------------------------------------------------------------------------
+class TestApprovalGate(unittest.TestCase):
+    def setUp(self):
+        self.fake = _Db()
+        db._client = self.fake
+        appmod.get_client = lambda: self.fake
+        owner_auth._LOGIN_ATTEMPTS.clear()
+        self.c = appmod.app.test_client()
+
+    def _register(self, name="venue_one"):
+        return self.c.post("/owner/register", data={
+            "username": name, "password": "a-long-enough-pass"})
+
+    def test_registration_creates_an_unapproved_account(self):
+        self._register()
+        owners = self.fake.rows("network_owners")
+        self.assertEqual(len(owners), 1)
+        self.assertIsNone(owners[0].get("approved_at"),
+                          "sign-up must not approve itself")
+
+    def test_pending_owner_sees_pending_page_not_a_widget(self):
+        self._register()
+        r = self.c.get("/owner/")
+        body = r.get_data(as_text=True)
+        self.assertIn("Awaiting approval", body)
+        self.assertNotIn("<script", body, "a pending owner must not be handed a snippet")
+
+    def test_pending_owner_cannot_register_a_domain(self):
+        self._register()
+        self.c.get("/owner/")
+        page = self.c.get("/owner/").get_data(as_text=True)
+        csrf = re.search(r'name="csrf_token" value="([^"]+)"', page)
+        r = self.c.post("/owner/sites", data={
+            "csrf_token": csrf.group(1) if csrf else "x",
+            "domain": "venue.example.com", "label": "Venue"})
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(self.fake.rows("widget_sites"), [],
+                         "no domain may be registered before approval")
+
+    def test_approval_unlocks_the_dashboard(self):
+        self._register()
+        owner_id = self.fake.rows("network_owners")[0]["id"]
+        owner_auth.set_approval(owner_id, True, "tester")
+        body = self.c.get("/owner/").get_data(as_text=True)
+        self.assertIn("Register site", body)
+        self.assertNotIn("Awaiting approval", body)
+
+    def test_approval_unlocks_domain_registration(self):
+        self._register()
+        owner_id = self.fake.rows("network_owners")[0]["id"]
+        owner_auth.set_approval(owner_id, True, "tester")
+        self.c.get("/owner/")
+        page = self.c.get("/owner/").get_data(as_text=True)
+        csrf = re.search(r'name="csrf_token" value="([^"]+)"', page)
+        r = self.c.post("/owner/sites", data={
+            "csrf_token": csrf.group(1) if csrf else "x",
+            "domain": "venue.example.com", "label": "Venue"})
+        self.assertEqual(r.status_code, 302)
+        self.assertEqual(len(self.fake.rows("widget_sites")), 1)
+
+    def test_revoking_approval_closes_it_again(self):
+        self._register()
+        owner_id = self.fake.rows("network_owners")[0]["id"]
+        owner_auth.set_approval(owner_id, True, "tester")
+        self.assertNotIn("Awaiting approval",
+                         self.c.get("/owner/").get_data(as_text=True))
+        owner_auth.set_approval(owner_id, False, "tester", "billing unresolved")
+        self.assertIn("Awaiting approval",
+                      self.c.get("/owner/").get_data(as_text=True))
+
+    def test_admin_approval_routes_require_basic_auth(self):
+        """A venue must not be able to approve itself."""
+        for path, data in (
+            ("/api/access-requests/1", {"decision": "approved", "csrf_token": "x"}),
+            ("/api/owners/1/approval", {"decision": "approved", "csrf_token": "x"}),
+        ):
+            r = self.c.post(path, data=data)
+            self.assertEqual(r.status_code, 401, path)
+        self.assertEqual(self.c.get("/api/access-requests").status_code, 401)
+
+    def test_intent_request_is_recorded_even_if_never_emailed(self):
+        self.c.get("/get-access")
+        page = self.c.get("/get-access").get_data(as_text=True)
+        csrf = re.search(r'name="csrf_token" value="([^"]+)"', page)
+        r = self.c.post("/get-access", data={
+            "csrf_token": csrf.group(1) if csrf else "x",
+            "org_name": "KNUST", "contact_email": "wifi@knust.edu.gh",
+            "domain": "wifi.knust.edu.gh", "network_type": "campus wifi",
+            "scale": "1 campus, ~4000 students", "use_case": "find dead spots"})
+        self.assertEqual(r.status_code, 200)
+        rows = self.fake.rows("venue_requests")
+        self.assertEqual(len(rows), 1, "intent must be durable, not just emailed")
+        self.assertEqual(rows[0]["org_name"], "KNUST")
+        self.assertEqual(rows[0]["scale"], "1 campus, ~4000 students")
+        # and the response must offer the prefilled email
+        self.assertIn("netrange@ashonlogist.website",
+                      r.get_data(as_text=True))

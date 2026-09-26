@@ -70,33 +70,85 @@ footer a{color:var(--dim)}
         payment &mdash; this page is about what the data is and who can have it.</p>
 
     <!-- ===================== PATH A ===================== -->
+    {% if sent %}
     <div class="card">
-        <div class="row spread">
-            <h2 style="margin:0">1. Add coverage reporting to your own site</h2>
-            <span class="tag">Self-serve &middot; free</span>
-        </div>
-        <p class="muted" style="margin-top:12px">If you run a network, a venue, a hotspot or a
-            campus WiFi, you can add a one-time consent widget to your own pages. Visitors who
-            tap Allow contribute their connection quality to the public map, and you get a
-            dashboard for the data coming from your domain.</p>
-        <ul class="ticks">
-            <li>Register an account and add your domain &mdash; no email verification, no billing.</li>
-            <li>Copy one <code>&lt;script&gt;</code> tag into your page.</li>
-            <li>Visitors see a consent prompt once per visit. Nothing is collected unless they tap Allow.</li>
-            <li>Your dashboard shows only data tied to your own registered domain.</li>
-        </ul>
-        <div class="row" style="margin-top:20px">
-            <a class="btn" href="/owner/register">Register a site</a>
-            <a class="btn ghost" href="/owner/login">I already have an account</a>
-        </div>
-        <div class="note" style="margin-bottom:0">
-            <strong>What a visitor is asked for:</strong> approximate location (via the browser's
-            own permission prompt, and only if they allow it), their connection type, and the
-            time of the visit. No cookie, no fingerprint, no advertising identifier, and no
-            client-side speed test. The widget asks on every page load, because the promise in
-            the prompt is "once per visit".
-        </div>
+      <div class="row spread">
+        <h2 style="margin:0">1. Request coverage reporting for your site</h2>
+        <span class="tag">Request received</span>
+      </div>
+      <p class="muted" style="margin-top:12px">Thanks &mdash; your request is recorded as
+        <strong>#{{ request_id }}</strong>. Coverage reporting is not self-serve, because
+        switching on a widget starts collecting data from your visitors. NetRange reviews
+        each request and comes back to you about whether it is free or billed, which
+        depends on the scale of your network.</p>
+      <p class="muted">Use the button below to send the details to
+        <strong>netrange@ashonlogist.website</strong> from your own mail client. It opens
+        with everything you typed already filled in.</p>
+      <div class="row" style="margin-top:18px">
+        <a class="btn" href="mailto:netrange@ashonlogist.website?subject={{ 'Coverage%20reporting%20request%20%23' ~ request_id ~ '%20-%20' ~ (sent.get('org_name') or 'venue') | urlencode }}&amp;body={{ ('Request reference: #' ~ request_id ~ '\n\nOrganisation: ' ~ (sent.get('org_name') or '') ~ '\nContact: ' ~ (sent.get('contact_email') or '') ~ '\nDomain: ' ~ (sent.get('domain') or '(not given)') ~ '\nNetwork type: ' ~ (sent.get('network_type') or '(not given)') ~ '\nScale: ' ~ (sent.get('scale') or '(not given)') ~ '\n\nWhat we want it for:\n' ~ (sent.get('use_case') or '') ~ '\n\nAnything else:\n' ~ (sent.get('message') or '-') ~ '\n\nSent from the NetRange get-access page.') | urlencode }}">Email this request</a>
+        <a class="btn ghost" href="/owner/login">I already have an account</a>
+      </div>
+      <div class="note" style="margin-bottom:0">
+        If the button does not open your mail client, write to
+        <strong>netrange@ashonlogist.website</strong> and quote reference
+        <strong>#{{ request_id }}</strong>.
+      </div>
     </div>
+    {% else %}
+    <div class="card">
+      <div class="row spread">
+        <h2 style="margin:0">1. Add coverage reporting to your own site</h2>
+        <span class="tag off">By request</span>
+      </div>
+      <p class="muted" style="margin-top:12px">If you run a network, a venue, a hotspot or a
+        campus WiFi, you can add a one-time consent widget to your own pages. Visitors who
+        tap Allow contribute their connection quality to the public map, and you get a
+        dashboard for the data coming from your domain.</p>
+      <p class="muted"><strong>This is not self-serve.</strong> Enabling a widget starts
+        collecting from your visitors, so each request is reviewed by a person. Whether it
+        is free or billed depends on the scale of your network and what you get back &mdash;
+        that conversation happens before anything is switched on.</p>
+      {% if error %}<p class="muted" style="color:#f87171">{{ error }}</p>{% endif %}
+      <form method="post" action="/get-access">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <label for="org_name">Organisation or venue name</label>
+        <input id="org_name" name="org_name" type="text" required
+               value="{{ form.get('org_name','') if form else '' }}">
+        <label for="contact_email">Your email</label>
+        <input id="contact_email" name="contact_email" type="email" required
+               value="{{ form.get('contact_email','') if form else '' }}">
+        <label for="domain">Domain you run (optional)</label>
+        <input id="domain" name="domain" type="text" placeholder="wifi.youruniversity.edu.gh"
+               value="{{ form.get('domain','') if form else '' }}">
+        <label for="network_type">Type of network</label>
+        <input id="network_type" name="network_type" type="text"
+               placeholder="campus wifi, ISP, hotspot, venue..."
+               value="{{ form.get('network_type','') if form else '' }}">
+        <label for="scale">Roughly how big</label>
+        <input id="scale" name="scale" type="text"
+               placeholder="e.g. 1 campus, ~4000 students, 12 hostels"
+               value="{{ form.get('scale','') if form else '' }}">
+        <label for="use_case">What you want it for</label>
+        <input id="use_case" name="use_case" type="text"
+               placeholder="find dead spots, plan upgrades, student project..."
+               value="{{ form.get('use_case','') if form else '' }}">
+        <label for="message">Anything else</label>
+        <input id="message" name="message" type="text"
+               value="{{ form.get('message','') if form else '' }}">
+        <div class="row" style="margin-top:20px">
+          <button type="submit">Send request</button>
+          <a class="btn ghost" href="/owner/login">I already have an account</a>
+        </div>
+      </form>
+      <div class="note" style="margin-bottom:0">
+        <strong>What a visitor is asked for:</strong> approximate location (via the browser's
+        own permission prompt, and only if they allow it), their connection type, and the
+        time of the visit. No cookie, no fingerprint, no advertising identifier, and no
+        client-side speed test. The widget asks on every page load, because the promise in
+        the prompt is "once per visit".
+      </div>
+    </div>
+    {% endif %}
 
     <!-- ===================== PATH B ===================== -->
     <div class="card">

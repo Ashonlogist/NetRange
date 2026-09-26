@@ -43,7 +43,9 @@ from functools import wraps
 from hashlib import sha256
 from urllib.parse import urlsplit
 
-from flask import abort, g, redirect, request, session
+from datetime import datetime, timezone
+
+from flask import abort, g, redirect, render_template, request, session
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from db import get_client
@@ -54,6 +56,14 @@ SMS_PHONE_PEPPER = os.environ.get("SMS_PHONE_PEPPER")
 # Session cookie name is distinct from anything the admin dashboard sets, so the
 # two never shadow each other in the same jar.
 OWNER_SESSION_KEY = "owner_id"
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _iso(dt: datetime) -> str:
+    return dt.isoformat()
 
 MIN_PASSWORD_LENGTH = 10
 USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,31}$")
@@ -356,3 +366,115 @@ def register_site(owner_id: int, domain: str, label: str) -> tuple[dict | None, 
     except Exception:
         return None, "Could not register that domain."
     return (resp.data or [None])[0], None
+
+
+# ---------------------------------------------------------------------------
+# Approval gate
+# ---------------------------------------------------------------------------
+# Registering an account records interest. It does not grant the widget.
+#
+# Coverage reporting is not self-serve: a venue reaches out by email, NetRange
+# decides whether to approve, and whether it is free or billed depends on the
+# scale of the network. Without this gate, /owner/register would hand out a
+# working widget to anyone who wanted one, which skips that decision entirely.
+#
+# The gate is enforced here, at the point of use, rather than by hiding buttons
+# in the templates. A hidden button is a UI convention; this is the rule.
+
+def owner_approved(owner_id: int) -> bool:
+    """Has this account been approved for widget access?"""
+    resp = (
+        get_client()
+        .table("network_owners")
+        .select("approved_at")
+        .eq("id", owner_id)
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    return bool(rows and rows[0].get("approved_at"))
+
+
+def require_approval(fn):
+    """
+    Decorator for owner routes that grant or depend on widget access.
+
+    A pending owner can sign in and see why they are waiting, but cannot add a
+    site, and by extension cannot obtain a widget snippet that would collect
+    anything.
+    """
+    def wrapper(*args, **kwargs):
+        oid = session.get(OWNER_SESSION_KEY)
+        if not oid:
+            return redirect("/owner/login")
+        if not owner_approved(oid):
+            return render_template(
+                "owner-pending.html",
+                csrf=csrf_token(),
+            ), 403
+        return fn(*args, **kwargs)
+    wrapper.__name__ = getattr(fn, "__name__", "wrapper")
+    return wrapper
+
+
+def set_approval(owner_id: int, approved: bool, decided_by: str,
+                 note: str = "") -> None:
+    """Record a decision. Called from the Basic-auth admin route only."""
+    get_client().table("network_owners").update({
+        "approved_at": _iso(_now()) if approved else None,
+        "approved_by": decided_by or None,
+        "decision_note": (note or None),
+    }).eq("id", owner_id).execute()
+
+
+def log_venue_request(org_name: str, contact_email: str, domain: str | None,
+                      network_type: str | None, scale: str | None,
+                      use_case: str | None, message: str | None) -> int | None:
+    """
+    Record what a venue asked for, before any human decides anything.
+
+    Kept in the database rather than only emailed, because an intent that lives
+    only in someone's inbox is lost the first time a mail is missed. The email is
+    the notification; this is the record.
+    """
+    clean = lambda v, n: (v or "").strip()[:n] or None  # noqa: E731
+    resp = (
+        get_client()
+        .table("venue_requests")
+        .insert({
+            "org_name": clean(org_name, 160) or "(unnamed)",
+            "contact_email": clean(contact_email, 200) or "(not given)",
+            "domain": normalize_domain(domain) if domain else None,
+            "network_type": clean(network_type, 80),
+            "scale": clean(scale, 200),
+            "use_case": clean(use_case, 400),
+            "message": clean(message, 2000),
+        })
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0].get("id") if rows else None
+
+
+def pending_requests(status: str = "new") -> list[dict]:
+    resp = (
+        get_client()
+        .table("venue_requests")
+        .select("*")
+        .eq("status", status)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return resp.data or []
+
+
+def pending_owners() -> list[dict]:
+    resp = (
+        get_client()
+        .table("network_owners")
+        .select("id,username,created_at")
+        .is_("approved_at", "null")
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return resp.data or []

@@ -22,11 +22,19 @@ import owner_auth
 import sms_reports
 from owner_auth import (OWNER_SESSION_KEY, check_csrf, client_ip, create_owner,
                         csrf_token, login_throttled, normalize_domain, origin_allowed,
+                        owner_approved, pending_owners, pending_requests,
+                        require_approval, set_approval,
                         owner_required, owner_sites, register_site, site_for_domain,
                         verify_login, widget_throttled)
 
 app = Flask(__name__)
 CORS(app)
+
+# Make the CSRF token available to every template. Passing it by hand meant a
+# form on a page that forgot to would render an empty value and then fail
+# closed at check_csrf() -- correct, but as a confusing 400 on a public page
+# rather than an obvious mistake in review.
+app.jinja_env.globals["csrf_token"] = csrf_token
 
 def _required_env(name):
     """Read an environment variable that has no safe default.
@@ -1073,8 +1081,45 @@ app.config["SESSION_COOKIE_SECURE"] = not app.debug
 app.config["SESSION_COOKIE_MAX_AGE"] = 60 * 60 * 8
 
 
-@app.route("/get-access")
+@app.route("/get-access", methods=["GET", "POST"])
 def get_access():
+    """
+    Landing page for both access paths.
+
+    Coverage reporting is deliberately NOT self-serve. A venue submits intent
+    here, which records the request and hands them a prefilled email to
+    netrange@ashonlogist.website. NetRange then decides whether to approve, and
+    whether it is free or billed depends on the scale of the network.
+
+    The form posts to us so the request is durable in the database even if the
+    email is never sent. The mailbox is the notification; the table is the
+    record.
+    """
+    if request.method == "POST":
+        check_csrf()
+        org = request.form.get("org_name")
+        email = request.form.get("contact_email")
+        if not (org or "").strip() or not (email or "").strip():
+            return render_template(
+                "get-access.html",
+                k=analytics.MIN_DEVICES_PER_CELL,
+                error="Please give an organisation name and a contact email.",
+                form=request.form,
+            ), 400
+        req_id = owner_auth.log_venue_request(
+            org, email,
+            request.form.get("domain"),
+            request.form.get("network_type"),
+            request.form.get("scale"),
+            request.form.get("use_case"),
+            request.form.get("message"),
+        )
+        return render_template(
+            "get-access.html",
+            k=analytics.MIN_DEVICES_PER_CELL,
+            sent=request.form,
+            request_id=req_id,
+        )
     return render_template("get-access.html", k=analytics.MIN_DEVICES_PER_CELL)
 
 
@@ -1198,6 +1243,60 @@ def owner_login():
     return render_template("owner-login.html", error=error)
 
 
+# ---------------------------------------------------------------------------
+# Admin: approve or decline venue access.
+#
+# Guarded by the existing dashboard HTTP Basic auth, not by an owner session --
+# this is NetRange acting on its own service, which is a different actor from a
+# venue acting on its own account. Deliberately no self-service path: if a
+# venue could approve itself, the gate would be decorative.
+# ---------------------------------------------------------------------------
+@app.route("/api/access-requests", methods=["GET"])
+def access_requests():
+    auth = _check_dashboard_auth()
+    if auth:
+        return auth
+    return jsonify({
+        "pending_requests": pending_requests("new"),
+        "pending_accounts": pending_owners(),
+    })
+
+
+@app.route("/api/access-requests/<int:req_id>", methods=["POST"])
+def decide_request(req_id):
+    auth = _check_dashboard_auth()
+    if auth:
+        return auth
+    check_csrf()
+    decision = (request.form.get("decision") or "").lower()
+    if decision not in ("approved", "declined"):
+        return jsonify({"error": "decision must be approved or declined"}), 400
+    note = request.form.get("note") or ""
+    upd = (get_client().table("venue_requests")
+           .update({"status": decision,
+                    "decided_at": datetime.now(timezone.utc).isoformat(),
+                    "decision_note": note or None})
+           .eq("id", req_id).execute())
+    if not (upd.data or []):
+        return jsonify({"error": "no such request"}), 404
+    return jsonify({"ok": True, "id": req_id, "status": decision})
+
+
+@app.route("/api/owners/<int:owner_id>/approval", methods=["POST"])
+def decide_owner(owner_id):
+    auth = _check_dashboard_auth()
+    if auth:
+        return auth
+    check_csrf()
+    decision = (request.form.get("decision") or "").lower()
+    if decision not in ("approved", "declined"):
+        return jsonify({"error": "decision must be approved or declined"}), 400
+    set_approval(owner_id, decision == "approved",
+                 request.form.get("decided_by") or DASHBOARD_USERNAME or "admin",
+                 request.form.get("note") or "")
+    return jsonify({"ok": True, "id": owner_id, "approved": decision == "approved"})
+
+
 @app.route("/owner/logout", methods=["POST"])
 def owner_logout():
     check_csrf()
@@ -1237,6 +1336,16 @@ def owner_site_stats(sites, scans):
 @app.route("/owner/")
 @owner_required
 def owner_dashboard():
+    """
+    A pending owner sees an explanation, not a widget.
+
+    The snippet is withheld here as well as at the site-registration route,
+    because a snippet alone is harmless but a snippet plus a registered domain
+    is a live collector -- and the whole point of the gate is that NetRange
+    approves usage before it starts.
+    """
+    if not owner_approved(g.owner_id):
+        return render_template("owner-pending.html", csrf=csrf_token()), 200
     sites = owner_sites(g.owner_id)
     scans = load_widget_scans([s["id"] for s in sites]) if sites else []
     return render_template(
@@ -1251,6 +1360,7 @@ def owner_dashboard():
 
 @app.route("/owner/sites", methods=["POST"])
 @owner_required
+@require_approval
 def owner_add_site():
     check_csrf()
     site, error = register_site(g.owner_id, request.form.get("domain"), request.form.get("label"))
@@ -1262,6 +1372,7 @@ def owner_add_site():
 
 @app.route("/owner/sites/<int:site_id>/sms", methods=["POST"])
 @owner_required
+@require_approval
 def owner_toggle_sms(site_id):
     """
     Flip sms_reporting_enabled for one of THIS owner's sites.

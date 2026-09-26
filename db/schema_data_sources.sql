@@ -162,3 +162,50 @@ create index if not exists sms_reports_site_idx on sms_reports (widget_site_id, 
 create index if not exists sms_reports_geo_idx on sms_reports (lat, lon);
 
 alter table sms_reports enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- Venue approval. Coverage reporting is NOT self-serve.
+--
+-- A venue expresses intent by email, NetRange decides whether to approve, and
+-- whether it is free or billed depends on the scale of the network. So account
+-- creation and widget access are separate events: registering records interest,
+-- and only an explicit approval unlocks the widget.
+--
+-- approved_at NULL  = intent recorded, awaiting a decision. No widget, no sites.
+-- approved_at set   = approved; the widget and site registration are unlocked.
+-- ---------------------------------------------------------------------------
+alter table network_owners add column if not exists approved_at timestamptz;
+alter table network_owners add column if not exists approved_by text;
+alter table network_owners add column if not exists decision_note text;
+
+create index if not exists network_owners_pending_idx
+  on network_owners (created_at) where approved_at is null;
+
+-- A durable record of what a venue asked for, kept even if they never send the
+-- email. Scale is captured up front because free-vs-billed is decided on it.
+create table if not exists venue_requests (
+  id bigserial primary key,
+  org_name text not null,
+  contact_email text not null,
+  domain text,
+  network_type text,          -- campus wifi / ISP / telco / hotspot / venue ...
+  scale text,                 -- sites, or approximate concurrent users
+  use_case text,
+  message text,
+  status text not null default 'new',   -- new | approved | declined
+  decided_at timestamptz,
+  decision_note text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists venue_requests_status_idx
+  on venue_requests (status, created_at desc);
+
+alter table venue_requests enable row level security;
+
+-- A site needs a location before an SMS report can be tied to it. Without
+-- lat/lon there is nothing to compare a reporter's position against, and
+-- attribute_site() refuses to guess -- see the note there about why carrier
+-- alone is not a location.
+alter table widget_sites add column if not exists lat double precision;
+alter table widget_sites add column if not exists lon double precision;

@@ -299,43 +299,95 @@ class SmsFlowTests(unittest.TestCase):
 
 
 class SmsAttributionTests(unittest.TestCase):
+    """
+    Attribution must be to a PLACE, not to a carrier.
+
+    The original version of this matched on carrier name alone, and its tests
+    asserted that. Which meant a venue registering "MTN" received every MTN
+    report in the country -- including its competitors' venues and every road
+    outside its own walls -- shown on its dashboard as its own.
+
+    Carrier is not a location. Attribution now requires coordinates that land
+    in the same cell as a registered site, so the worst case is a quiet
+    dashboard rather than someone else's complaints.
+    """
+
+    ACCRA = (5.6037, -0.1870)
+    KUMASI = (6.6885, -1.6244)
+
     def setUp(self):
         self.fake = _Db()
         owner_auth.SMS_PHONE_PEPPER = "test-phone-pepper"
+        # Site 1: opted in, carrier MTN, located in Accra.
         self.fake.table("widget_sites").insert(
             {"id": 1, "domain": "volta.example.com", "label": "Volta Hall",
-             "sms_reporting_enabled": True, "sms_carrier": "MTN"}
+             "sms_reporting_enabled": True, "sms_carrier": "MTN",
+             "lat": self.ACCRA[0], "lon": self.ACCRA[1]}
         ).execute()
+        # Site 2: same carrier, but never opted in.
         self.fake.table("widget_sites").insert(
             {"id": 2, "domain": "other.example.com", "label": "Other",
-             "sms_reporting_enabled": False, "sms_carrier": "MTN"}
+             "sms_reporting_enabled": False, "sms_carrier": "MTN",
+             "lat": self.ACCRA[0], "lon": self.ACCRA[1]}
         ).execute()
 
-    def test_attaches_to_opted_in_site_with_matching_carrier(self):
-        self.assertEqual(sms_reports.attribute_site(self.fake, "MTN"), 1)
+    def test_attaches_when_carrier_and_place_both_match(self):
+        self.assertEqual(
+            sms_reports.attribute_site(self.fake, "MTN", *self.ACCRA), 1)
 
     def test_carrier_matching_is_not_brittle(self):
         for spelling in ("mtn", "MTN Ghana", "  Mtn  ", "MTN Ghana Limited"):
-            self.assertEqual(sms_reports.attribute_site(self.fake, spelling), 1, spelling)
+            self.assertEqual(
+                sms_reports.attribute_site(self.fake, spelling, *self.ACCRA), 1, spelling)
+
+    def test_refuses_when_the_report_has_no_location(self):
+        """
+        The bug this whole class exists for. No coordinates means no place, and
+        no place means we cannot claim it belongs to this venue.
+        """
+        self.assertIsNone(sms_reports.attribute_site(self.fake, "MTN"))
+        self.assertIsNone(sms_reports.attribute_site(self.fake, "MTN", None, None))
+
+    def test_refuses_when_the_report_is_elsewhere_in_the_country(self):
+        """A Kumasi texter is not a Volta Hall visitor, whatever their carrier."""
+        self.assertIsNone(
+            sms_reports.attribute_site(self.fake, "MTN", *self.KUMASI))
 
     def test_does_not_attach_to_a_site_that_did_not_opt_in(self):
-        # Only MTN is opted in here; Telecel has no opted-in site.
-        self.assertIsNone(sms_reports.attribute_site(self.fake, "Telecel"))
+        self.assertIsNone(
+            sms_reports.attribute_site(self.fake, "Telecel", *self.ACCRA))
 
     def test_does_not_attach_when_no_carrier_given(self):
-        self.assertIsNone(sms_reports.attribute_site(self.fake, None))
-        self.assertIsNone(sms_reports.attribute_site(self.fake, "   "))
+        self.assertIsNone(sms_reports.attribute_site(self.fake, None, *self.ACCRA))
+        self.assertIsNone(sms_reports.attribute_site(self.fake, "   ", *self.ACCRA))
 
     def test_never_attaches_when_no_opted_in_site_declares_a_carrier(self):
-        # Isolate the case: one opted-in site, but it never named its carrier.
         self.fake.tables["widget_sites"] = [
             {"id": 3, "domain": "third.example.com", "sms_reporting_enabled": True,
-             "sms_carrier": None}
+             "sms_carrier": None, "lat": self.ACCRA[0], "lon": self.ACCRA[1]}
         ]
         self.assertIsNone(
-            sms_reports.attribute_site(self.fake, "MTN"),
+            sms_reports.attribute_site(self.fake, "MTN", *self.ACCRA),
             "a site with no declared carrier must never be matched on a guess",
         )
+
+    def test_never_attaches_when_the_site_has_no_known_location(self):
+        """
+        A site registered without coordinates cannot be tested against, so
+        attribution is refused rather than guessed.
+        """
+        self.fake.tables["widget_sites"] = [
+            {"id": 4, "domain": "noloc.example.com", "sms_reporting_enabled": True,
+             "sms_carrier": "MTN", "lat": None, "lon": None}
+        ]
+        self.assertIsNone(
+            sms_reports.attribute_site(self.fake, "MTN", *self.ACCRA),
+            "a site with no location must not swallow a whole country's reports",
+        )
+
+    def test_sms_toggle_off_blocks_attribution_even_in_place(self):
+        self.fake.tables["widget_sites"][0]["sms_reporting_enabled"] = False
+        self.assertIsNone(sms_reports.attribute_site(self.fake, "MTN", *self.ACCRA))
 
 
 class SmsKAnonymityTests(unittest.TestCase):
