@@ -1123,6 +1123,12 @@
         var heatmap;
         var coverageLayer;
         var contourLayer;
+        /* Last triangle set handed to renderMeshOnMap (the app's render path).
+           Cached so setCoverageMetric can recolour it without a refetch: the
+           mesh does not change when only the metric changes, and re-running
+           the full generateCoverage() would also swap the popup contents and
+           drop the raw point markers that path adds. */
+        var lastRenderedTriangles = null;
         var markers = [];
         var targetSsid = null;
         var locMarker = null;
@@ -1470,7 +1476,19 @@
                 b.classList.toggle('active', b.dataset.metric === metric);
             });
             try { localStorage.setItem('netrange.coverageMetric', metric); } catch (e) {}
-            if (coverageLayer) generateCoverage();
+            /* Recolour whatever is actually on screen. renderMeshOnMap() is the
+               app's path and fills contourLayer, not coverageLayer, so testing
+               only coverageLayer left the app's mesh frozen on the old colours
+               until the user regenerated the map by hand. Prefer the cached
+               triangles (no refetch, identical geometry); otherwise fall back
+               to the page's own coverage layer. */
+            if (lastRenderedTriangles && lastRenderedTriangles.length) {
+                renderMeshOnMap(lastRenderedTriangles);
+            } else if (lastRenderedPoints && lastRenderedPoints.length) {
+                window.renderPointsOnMap(lastRenderedPoints);
+            } else if (coverageLayer) {
+                generateCoverage();
+            }
             showToast('Colouring by ' + metricLabel().toLowerCase());
         }
 
@@ -1479,6 +1497,8 @@
         window.renderMeshOnMap = function (triangles) {
             if (!triangles || !triangles.length) return 0;
             if (typeof L === 'undefined' || typeof map === 'undefined') return 0;
+            lastRenderedTriangles = triangles;
+            lastRenderedPoints = null;
             if (typeof contourLayer !== 'undefined' && contourLayer) map.removeLayer(contourLayer);
             contourLayer = L.layerGroup();
             var allPts = [];
@@ -1498,6 +1518,48 @@
             contourLayer.addTo(map);
             if (allPts.length) map.fitBounds(L.latLngBounds(allPts), { padding: [50, 50] });
             return triangles.length;
+        };
+
+        /* Point fallback, for when there is no mesh yet and the app only has
+           raw scan locations. Lives here for the same reason renderMeshOnMap
+           does: the app used to inject its own colouring, which had drifted
+           onto a second, conflicting scale (green/cyan/yellow/orange/red --
+           cyan reads as "cold", i.e. poorly covered, the opposite of a good
+           reading). Sharing METRIC_COLORS is what keeps one colour language
+           across both render paths.
+
+           /api/heatmap only emits signal_dbm, so with the metric set to speed
+           these points genuinely have no value. They render in the "no reading"
+           grey and say so in the popup rather than being quietly coloured by
+           signal, which would contradict the Speed/Signal control. */
+        var lastRenderedPoints = null;
+        function pointMetricValue(p) {
+            return COVERAGE_METRIC === 'speed' ? p.download_speed_mbps : p.signal_dbm;
+        }
+        window.renderPointsOnMap = function (points) {
+            if (!points || !points.length) return 0;
+            if (typeof L === 'undefined' || typeof map === 'undefined') return 0;
+            lastRenderedPoints = points;
+            lastRenderedTriangles = null;
+            if (typeof contourLayer !== 'undefined' && contourLayer) map.removeLayer(contourLayer);
+            contourLayer = L.layerGroup();
+            var allPts = [];
+            points.forEach(function (p) {
+                var val = pointMetricValue(p);
+                var color = metricColor(val);
+                var shown = (val === null || val === undefined)
+                    ? 'no reading'
+                    : (COVERAGE_METRIC === 'speed' ? val.toFixed(1) : val.toFixed(0)) + metricUnit();
+                L.circleMarker([p.lat, p.lng], {
+                    radius: 20, color: color, fillColor: color,
+                    fillOpacity: 0.35, weight: 1, opacity: 0.6,
+                }).bindPopup((p.ssid || 'Unknown') + '<br><b>' + metricLabel() + ':</b> ' + shown)
+                  .addTo(contourLayer);
+                allPts.push([p.lat, p.lng]);
+            });
+            contourLayer.addTo(map);
+            if (allPts.length) map.fitBounds(L.latLngBounds(allPts), { padding: [50, 50] });
+            return points.length;
         };
 
         async function generateCoverage() {
@@ -1605,6 +1667,10 @@
         function clearCoverage() {
             if (coverageLayer) { map.removeLayer(coverageLayer); coverageLayer = null; }
             if (contourLayer) { map.removeLayer(contourLayer); contourLayer = null; }
+            /* Drop the cached geometry too, otherwise a later metric toggle
+               would recolour -- and re-add -- what was just cleared. */
+            lastRenderedTriangles = null;
+            lastRenderedPoints = null;
             if (heatmap) { map.removeLayer(heatmap); }
             heatmap = L.heatLayer([], { radius: 30, blur: 20, maxZoom: 18, max: 1.0 }).addTo(map);
             markers.forEach(function(m) { map.removeLayer(m); });

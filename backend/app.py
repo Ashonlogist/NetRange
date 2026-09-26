@@ -3,11 +3,12 @@ import math
 import csv
 import io
 import time
+import secrets
 import requests
 from datetime import datetime, timezone, timedelta
 from flask import Flask, render_template, request, jsonify, send_from_directory, redirect, abort, Response, session
 from flask_cors import CORS
-from scanner import scan, get_current_connection
+from scanner import scan, get_current_connection, signal_to_dbm
 from db import save_scan, load_scans, get_client
 from algorithm import delaunay_interpolate, generate_contours, mesh_geojson
 from analytics import (aggregate_coverage_cells, carrier_comparison,
@@ -16,13 +17,45 @@ import analytics
 import insights
 from geocoding import reverse_geocode_cells
 from api_keys import require_api_key
+from device_auth import issue_token_for_device, registration_throttled, require_device_token
 
 app = Flask(__name__)
 CORS(app)
 
-DASHBOARD_SECRET = os.environ.get("DASHBOARD_SECRET", "nr-secret-2026-analytics-prod")
-DASHBOARD_PASS = os.environ.get("DASHBOARD_PASSWORD", "netrange2026")
+def _required_env(name):
+    """Read an environment variable that has no safe default.
+
+    These back the dashboard's HTTP Basic login and the destructive
+    /api/cleanup endpoint, so a missing value has to stop the process at
+    import time rather than fall back to something guessable and public.
+    """
+    value = (os.environ.get(name) or "").strip()
+    if not value:
+        raise RuntimeError(
+            f"{name} is not set, and it has no default. "
+            f"Set it before starting the service "
+            f"(Render: Environment > add {name}, then redeploy; "
+            f"locally: export {name}=...) and try again."
+        )
+    return value
+
+
+# DASHBOARD_USERNAME + DASHBOARD_PASSWORD guard every /dashboard* route and
+# /api/cleanup (which deletes scan rows), via _check_dashboard_auth().
+# DASHBOARD_SECRET signs the dashboard's session cookie. None are optional,
+# and none may be hardcoded: a value baked into source is public the moment
+# the repo is, which would leave a data-deletion endpoint behind a known
+# password. The username is required too -- checking only the password meant
+# any username at all was accepted, which is half of Basic auth doing nothing.
+DASHBOARD_SECRET = _required_env("DASHBOARD_SECRET")
+DASHBOARD_USERNAME = _required_env("DASHBOARD_USERNAME")
+DASHBOARD_PASS = _required_env("DASHBOARD_PASSWORD")
 app.secret_key = DASHBOARD_SECRET
+
+# SCAN_AUTH_ENFORCED_AT (the grace window that keeps pre-token app builds
+# working) is deliberately *not* read here -- device_auth.scan_auth_enforced()
+# reads it per request so the deadline passes without a redeploy. Do not cache
+# it at import time; two sources of truth for a security deadline is a trap.
 
 APP_VERSION = "1.4.2"
 # The APK is published as a GitHub release asset, not served from this
@@ -243,7 +276,36 @@ def api_scan():
     })
 
 
+@app.route("/api/register-device", methods=["POST"])
+def api_register_device():
+    """Mint a per-install token so this device can write scans.
+
+    Open by necessity -- an install cannot hold a shared secret -- but
+    throttled per IP, and the token is only ever returned to the caller that
+    asked for it (the server keeps just its SHA-256).
+    """
+    if registration_throttled():
+        return jsonify({
+            "error": "Too many registration attempts. Try again later.",
+        }), 429
+
+    data = request.get_json(silent=True) or {}
+    device_id = (data.get("deviceId") or "").strip()
+    if not device_id:
+        return jsonify({"error": "deviceId is required."}), 400
+    if len(device_id) > 128:
+        return jsonify({"error": "deviceId is too long."}), 400
+
+    try:
+        token = issue_token_for_device(device_id)
+    except Exception:
+        return jsonify({"error": "Could not register device."}), 503
+
+    return jsonify({"registered": True, "token": token})
+
+
 @app.route("/api/scan", methods=["POST"])
+@require_device_token
 def api_scan_post():
     data = request.get_json(silent=True) or {}
     wifi = data.get("wifi") or []
@@ -259,14 +321,9 @@ def api_scan_post():
     timestamp = data.get("timestamp")
     download_speed = data.get("download_speed_mbps")
 
-    def to_dbm(strength):
-        if not isinstance(strength, (int, float)):
-            return None
-        if strength < 0:
-            return round(strength, 1)
-        if strength <= 1:
-            return round(strength * 50 - 100, 1)
-        return round(strength / 2 - 100, 1)
+    # One shared conversion for every signal reading in this request -- see
+    # scanner.signal_to_dbm for why the branches are split on sign.
+    to_dbm = signal_to_dbm
 
     records = []
     seen_bssids = set()
@@ -479,10 +536,45 @@ def api_cleanup():
     return jsonify({"deleted": deleted, "cutoff_days": days})
 
 
+def _constant_time_equals(a, b):
+    """Compare two secrets without leaking their common prefix length.
+
+    Both sides are encoded to bytes first: compare_digest raises TypeError on
+    non-ASCII str, which would turn a wrong password into a 500 and tell the
+    caller the credential was close enough to matter.
+    """
+    return secrets.compare_digest(
+        (a or "").encode("utf-8"), (b or "").encode("utf-8")
+    )
+
+
 def _check_dashboard_auth():
+    """HTTP Basic gate for the dashboard and for /api/cleanup.
+
+    Cleanup is the one endpoint that destroys data, so it is gated by the same
+    required credentials read at startup -- there is no separate secret here
+    to forget to configure, and no anonymous path to it.
+
+    Both halves of the credential are compared, and compared in constant time:
+    a byte-by-byte `!=` leaks how much of a guess was correct through response
+    timing. Values are encoded first so a non-ASCII password cannot make
+    compare_digest raise TypeError (which would turn a wrong password into a
+    500). Neither comparison short-circuits, so a correct username with a
+    wrong password takes the same time as a wholly wrong pair.
+    """
     auth = request.authorization
-    if not auth or auth.password != DASHBOARD_PASS:
-        return Response("Unauthorized", 401, {"WWW-Authenticate": 'Basic realm="NetRange Dashboard"'})
+    if not auth:
+        return Response(
+            "Unauthorized", 401,
+            {"WWW-Authenticate": 'Basic realm="NetRange Dashboard"'},
+        )
+    user_ok = _constant_time_equals(auth.username or "", DASHBOARD_USERNAME)
+    pass_ok = _constant_time_equals(auth.password or "", DASHBOARD_PASS)
+    if not (user_ok and pass_ok):
+        return Response(
+            "Unauthorized", 401,
+            {"WWW-Authenticate": 'Basic realm="NetRange Dashboard"'},
+        )
     return None
 
 

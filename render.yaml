@@ -12,4 +12,18 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_KEY
         sync: false
+      # Required, no default: backend/app.py refuses to start without them.
+      # Declared here so a Blueprint deploy prompts instead of crash-looping.
+      - key: DASHBOARD_USERNAME
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: DASHBOARD_SECRET
+        sync: false
+      # Grace window that keeps pre-token app builds able to write scans.
+      # ISO-8601; the deadline passes on its own, no redeploy needed. Unset
+      # means enforce immediately. Delete once no old builds remain in the
+      # field -- while this is in the future, tokenless writes are tolerated.
+      - key: SCAN_AUTH_ENFORCED_AT
+        sync: false
     autoDeploy: true

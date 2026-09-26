@@ -10,6 +10,8 @@ import {
   Animated,
   Dimensions,
   Pressable,
+  Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -19,7 +21,8 @@ import { Header, Card, Button, Input, Badge, StatRow, T } from '@/components/UI'
 import { useApp } from '@/components/Providers';
 import { useUpdater } from '@/components/Updater';
 import * as SecureStore from 'expo-secure-store';
-import { registerBackgroundScan } from '@/lib/backgroundTask';
+import { registerBackgroundScan, getBackgroundScanStatus, type BackgroundScanState } from '@/lib/backgroundTask';
+import { postScan } from '@/lib/deviceAuth';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const PANEL_H = SCREEN_H * 0.7;
@@ -68,24 +71,69 @@ export default function HomeScreen() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const [interpolationStep, setInterpolationStep] = useState('0.00005');
-  const [interpolationPower, setInterpolationPower] = useState('2');
-  const [interpolationRadius, setInterpolationRadius] = useState('0.005');
   const [autoSync, setAutoSync] = useState(false);
 
   const [carrierOverride, setCarrierOverride] = useState('');
-  const [sim1Carrier, setSim1Carrier] = useState('');
-  const [sim2Carrier, setSim2Carrier] = useState('');
-  const [activeSim, setActiveSim] = useState<'sim1' | 'sim2'>('sim1');
   const [showDisclosure, setShowDisclosure] = useState(false);
+  const [bgScan, setBgScan] = useState<{
+    state: BackgroundScanState;
+    canAskAgain: boolean;
+  } | null>(null);
+  const [bgBusy, setBgBusy] = useState(false);
+
+  const [webError, setWebError] = useState<string | null>(null);
 
   const webViewRef = useRef<WebView>(null);
+
+  // A reload that succeeds must clear the previous failure, otherwise the
+  // error view would stay pinned over a map that is now fine.
+  const handleWebRetry = () => {
+    setWebError(null);
+    webViewRef.current?.reload();
+  };
+
+  // Background scan status is a read-only query that must not prompt for
+  // permission, so it is refreshed on mount and on demand from Settings --
+  // deliberately not on every panel open, to avoid a redundant call.
+  const refreshBgScan = async () => {
+    const s = await getBackgroundScanStatus();
+    setBgScan({ state: s.state, canAskAgain: s.canAskAgain });
+  };
+
+  useEffect(() => {
+    refreshBgScan();
+  }, []);
+
+  const handleBgScanAction = async () => {
+    setBgBusy(true);
+    try {
+      const s = await getBackgroundScanStatus();
+      if (s.state === 'active') return;
+      if (s.canAskAgain) {
+        // Re-run the opt-in registration, which triggers the system prompt.
+        await registerBackgroundScan();
+      } else {
+        // Permanently denied -- the OS won't show a prompt again, so the
+        // only route left is the app's settings page.
+        await Linking.openSettings();
+      }
+      await refreshBgScan();
+    } catch {
+      Alert.alert('Error', 'Could not update background scanning.');
+    } finally {
+      setBgBusy(false);
+    }
+  };
 
   useEffect(() => {
     loadSettings();
     if (Platform.OS !== 'web') {
       loadNetworks();
-      registerBackgroundScan();
+      registerBackgroundScan().catch(() => {
+        // Deliberately silent here: this runs on every app start, and a
+        // failure is not actionable for the user at this point. The Settings
+        // tab surfaces the real state via getBackgroundScanStatus().
+      });
       SecureStore.getItemAsync('disclosureAccepted').then(v => {
         if (!v) setShowDisclosure(true);
       });
@@ -193,18 +241,14 @@ export default function HomeScreen() {
 
         const speed = await measureDownloadSpeed();
 
-        await fetch(`${apiUrl}/api/scan`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            wifi,
-            cellular,
-            location: loc.coords,
-            targetSsid: autoTarget,
-            deviceId,
-            timestamp: new Date().toISOString(),
-            download_speed_mbps: speed,
-          }),
+        await postScan(apiUrl, deviceId, {
+          wifi,
+          cellular,
+          location: loc.coords,
+          targetSsid: autoTarget,
+          deviceId,
+          timestamp: new Date().toISOString(),
+          download_speed_mbps: speed,
         });
 
         const meshResp = await fetch(`${apiUrl}/api/mesh?ssid=${encodeURIComponent(autoTarget)}`);
@@ -238,22 +282,12 @@ export default function HomeScreen() {
 
   const loadSettings = async () => {
     try {
-      const [step, power, radius, sync, carrier, s1, s2] = await Promise.all([
-        SecureStore.getItemAsync('interpolationStep'),
-        SecureStore.getItemAsync('interpolationPower'),
-        SecureStore.getItemAsync('interpolationRadius'),
+      const [sync, carrier] = await Promise.all([
         SecureStore.getItemAsync('autoSync'),
         SecureStore.getItemAsync('carrierName'),
-        SecureStore.getItemAsync('sim1Carrier'),
-        SecureStore.getItemAsync('sim2Carrier'),
       ]);
-      if (step) setInterpolationStep(step);
-      if (power) setInterpolationPower(power);
-      if (radius) setInterpolationRadius(radius);
       if (sync) setAutoSync(sync === 'true');
       if (carrier) setCarrierOverride(carrier);
-      if (s1) setSim1Carrier(s1);
-      if (s2) setSim2Carrier(s2);
     } catch {}
   };
 
@@ -332,6 +366,24 @@ export default function HomeScreen() {
 
   const handleSelectNetwork = (ssid: string) => setTargetSsid(ssid);
 
+  /**
+   * Drop the stored override and re-detect immediately. Without this the
+   * override is permanent: every detection path prefers `carrierName` over
+   * what the network actually reports, so once set there was previously no
+   * way back to auto-detect.
+   */
+  const handleClearCarrier = async () => {
+    try {
+      await SecureStore.deleteItemAsync('carrierName');
+      setCarrierOverride('');
+      // Re-run detection so the UI reflects the real carrier immediately
+      // rather than waiting for the next poll tick.
+      await loadNetworks();
+    } catch {
+      Alert.alert('Error', 'Failed to clear the carrier override.');
+    }
+  };
+
   const handleEditCarrier = () => {
     if (!cellularInfo) return;
     setPanelTab('settings');
@@ -380,19 +432,22 @@ export default function HomeScreen() {
     setSaving(true);
     try {
       const speed = await measureDownloadSpeed();
-      const response = await fetch(`${apiUrl}/api/scan`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          wifi: wifiNetworks,
-          cellular: cellularInfo,
-          location: currentLocation,
-          targetSsid,
-          deviceId,
-          timestamp: new Date().toISOString(),
-          download_speed_mbps: speed,
-        }),
+      const response = await postScan(apiUrl, deviceId, {
+        wifi: wifiNetworks,
+        cellular: cellularInfo,
+        location: currentLocation,
+        targetSsid,
+        deviceId,
+        timestamp: new Date().toISOString(),
+        download_speed_mbps: speed,
       });
+      if (response.status === 401) {
+        Alert.alert(
+          'Save Failed',
+          'This device is not authorised to write scans. Reopen the app to register, then try again.'
+        );
+        return;
+      }
       if (!response.ok) {
         Alert.alert('Save Failed', `Server error ${response.status}`);
         return;
@@ -434,30 +489,12 @@ export default function HomeScreen() {
         return;
       }
       const heatJson = JSON.stringify(hData.points);
+      // No mesh yet, so render the raw points. The colouring lives in
+      // map.html (METRIC_COLORS) so this path speaks the same colour
+      // language as the mesh path; it used to inject its own conflicting
+      // green/cyan/yellow/orange/red ramp here.
       webViewRef.current?.injectJavaScript(`
-        (function() {
-          if (typeof L === 'undefined' || typeof map === 'undefined') return;
-          if (typeof contourLayer !== 'undefined' && contourLayer) map.removeLayer(contourLayer);
-          contourLayer = L.layerGroup();
-          var pts = ${heatJson};
-          var allPts = [];
-          pts.forEach(function(p) {
-            var color = p.weight > 0.8 ? '#22c55e' : p.weight > 0.6 ? '#06b6d4' : p.weight > 0.4 ? '#eab308' : p.weight > 0.2 ? '#f97316' : '#ef4444';
-            L.circleMarker([p.lat, p.lng], {
-              radius: 20,
-              color: color,
-              fillColor: color,
-              fillOpacity: 0.35,
-              weight: 1,
-              opacity: 0.6,
-            }).bindPopup((p.ssid || 'Unknown') + '<br>' + p.signal_dbm + ' dBm').addTo(contourLayer);
-            allPts.push([p.lat, p.lng]);
-          });
-          contourLayer.addTo(map);
-          if (allPts.length > 0) {
-            map.fitBounds(L.latLngBounds(allPts), { padding: [50, 50] });
-          }
-        })();
+        if (typeof window.renderPointsOnMap === 'function') window.renderPointsOnMap(${heatJson});
         true;
       `);
       Alert.alert('Map Loaded', hData.points.length + ' scan points rendered');
@@ -470,12 +507,7 @@ export default function HomeScreen() {
 
   const saveSettings = async () => {
     try {
-      await Promise.all([
-        SecureStore.setItemAsync('interpolationStep', interpolationStep),
-        SecureStore.setItemAsync('interpolationPower', interpolationPower),
-        SecureStore.setItemAsync('interpolationRadius', interpolationRadius),
-        SecureStore.setItemAsync('autoSync', autoSync.toString()),
-      ]);
+      await SecureStore.setItemAsync('autoSync', autoSync.toString());
       Alert.alert('Saved', 'Settings saved');
     } catch {
       Alert.alert('Error', 'Failed to save');
@@ -520,6 +552,33 @@ export default function HomeScreen() {
         style={s.web}
         javaScriptEnabled
         domStorageEnabled
+        onLoadStart={() => setWebError(null)}
+        onError={(e) => {
+          // navigationFailure is not a hard load failure -- the main frame
+          // failing is. Treat only main-frame errors as "the map is broken".
+          const navFailure = e.nativeEvent as unknown as { navigationFailure?: boolean };
+          if (navFailure?.navigationFailure) return;
+          setWebError(
+            e.nativeEvent?.description ||
+            'Could not load the map. Check your connection and that the server is reachable.'
+          );
+        }}
+        renderLoading={() => (
+          <View style={s.webState}>
+            <ActivityIndicator size="large" color={T.accent} />
+            <Text style={s.webStateText}>Loading map…</Text>
+          </View>
+        )}
+        renderError={() => (
+          <View style={s.webState}>
+            <Ionicons name="cloud-offline-outline" size={36} color={T.red} />
+            <Text style={s.webStateTitle}>Map unavailable</Text>
+            <Text style={s.webStateText}>
+              {webError || 'Could not load the map. Check your connection and that the server is reachable.'}
+            </Text>
+            <Button title="Retry" onPress={handleWebRetry} icon="↺" />
+          </View>
+        )}
       />
 
       {panelOpen && (
@@ -703,54 +762,93 @@ export default function HomeScreen() {
                 onChangeText={setCarrierOverride}
                 placeholder={cellularInfo?.carrier || 'e.g. Telecel'}
               />
-              <Button
-                title="Save Carrier"
-                onPress={async () => {
-                  if (!carrierOverride.trim()) return;
-                  await SecureStore.setItemAsync('carrierName', carrierOverride.trim());
-                  setCellularInfo(prev => prev ? { ...prev, carrier: carrierOverride.trim() } : null);
-                  Alert.alert('Saved', `Carrier set to ${carrierOverride.trim()}`);
-                }}
-                variant="secondary"
-              />
+              <Text style={s.hintText}>
+                {carrierOverride.trim()
+                  ? 'Active — this name is used for every cellular scan, overriding what the network reports.'
+                  : 'No override set. NetRange uses the carrier detected from the network.'}
+              </Text>
+              <View style={{ gap: 8 }}>
+                <Button
+                  title="Save Carrier"
+                  onPress={async () => {
+                    if (!carrierOverride.trim()) return;
+                    await SecureStore.setItemAsync('carrierName', carrierOverride.trim());
+                    setCellularInfo(prev => prev ? { ...prev, carrier: carrierOverride.trim() } : null);
+                    Alert.alert('Saved', `Carrier set to ${carrierOverride.trim()}`);
+                  }}
+                  variant="secondary"
+                />
+                {carrierOverride.trim() ? (
+                  <Button
+                    title="Clear override & use auto-detect"
+                    onPress={handleClearCarrier}
+                    variant="secondary"
+                    icon="↺"
+                  />
+                ) : null}
+              </View>
 
-              <Text style={s.sectionTitle}>SIM Carriers</Text>
-              <Card style={{ padding: 12, marginBottom: 8 }}>
-                <Text style={{ color: T.textMuted, fontSize: 11, marginBottom: 8 }}>
-                  For dual-SIM phones. Pick your carriers for each SIM slot.
+              <Text style={s.sectionTitle}>Background Scanning</Text>
+              <Card style={s.statusCard}>
+                <View style={s.statusRow}>
+                  {bgScan?.state === 'active' ? (
+                    <Ionicons name="checkmark-circle" size={16} color={T.green} />
+                  ) : bgScan?.state === 'permission-needed' ? (
+                    <Ionicons name="alert-circle" size={16} color={T.yellow} />
+                  ) : bgScan?.state === 'not-supported' ? (
+                    <Ionicons name="remove-circle-outline" size={16} color={T.textMuted} />
+                  ) : (
+                    <ActivityIndicator size="small" color={T.textMuted} />
+                  )}
+                  <Text
+                    style={[
+                      s.statusText,
+                      bgScan?.state === 'active' && { color: T.green },
+                      bgScan?.state === 'permission-needed' && { color: T.yellow },
+                    ]}
+                  >
+                    {!bgScan
+                      ? 'Checking...'
+                      : bgScan.state === 'active'
+                        ? 'Active'
+                        : bgScan.state === 'permission-needed'
+                          ? 'Permission needed'
+                          : 'Not supported on this device'}
+                  </Text>
+                </View>
+                <Text style={s.hintText}>
+                  {!bgScan
+                    ? 'Reading current permission and task state.'
+                    : bgScan.state === 'active'
+                      ? 'Scans are recorded while you move, even with the app closed.'
+                      : bgScan.state === 'permission-needed'
+                        ? 'NetRange needs "Allow all the time" location access to record scans in the background. Foreground scanning still works without it.'
+                        : 'Background scanning requires Android. Foreground scanning still works.'}
                 </Text>
-                {['MTN', 'Telecel', 'AirtelTigo'].map((c) => (
-                  <TouchableOpacity
-                    key={c}
-                    style={[s.simOption, sim1Carrier === c && s.simOptionActive]}
-                    onPress={async () => {
-                      setSim1Carrier(c);
-                      await SecureStore.setItemAsync('sim1Carrier', c);
-                    }}
-                  >
-                    <Text style={[s.simLabel, sim1Carrier === c && { color: T.accent }]}>SIM1: {c}</Text>
-                    {sim1Carrier === c && <Ionicons name="checkmark-circle" size={14} color={T.accent} />}
-                  </TouchableOpacity>
-                ))}
-                {['MTN', 'Telecel', 'AirtelTigo'].map((c) => (
-                  <TouchableOpacity
-                    key={`s2-${c}`}
-                    style={[s.simOption, sim2Carrier === c && s.simOptionActive]}
-                    onPress={async () => {
-                      setSim2Carrier(c);
-                      await SecureStore.setItemAsync('sim2Carrier', c);
-                    }}
-                  >
-                    <Text style={[s.simLabel, sim2Carrier === c && { color: T.accent2 }]}>SIM2: {c}</Text>
-                    {sim2Carrier === c && <Ionicons name="checkmark-circle" size={14} color={T.accent2} />}
-                  </TouchableOpacity>
-                ))}
+                {bgScan?.state === 'permission-needed' && (
+                  <Button
+                    title={bgBusy ? 'Working...' : bgScan.canAskAgain ? 'Grant permission' : 'Open app settings'}
+                    onPress={handleBgScanAction}
+                    disabled={bgBusy}
+                    loading={bgBusy}
+                    variant="secondary"
+                  />
+                )}
+                {bgScan?.state === 'active' && (
+                  <Button
+                    title="Re-check"
+                    onPress={refreshBgScan}
+                    variant="secondary"
+                    icon="↺"
+                  />
+                )}
               </Card>
-
-              <Text style={s.sectionTitle}>Interpolation (IDW)</Text>
-              <Input label="Grid Step" value={interpolationStep} onChangeText={setInterpolationStep} keyboardType="decimal-pad" placeholder="0.00005" />
-              <Input label="Power" value={interpolationPower} onChangeText={setInterpolationPower} keyboardType="numeric" placeholder="2" />
-              <Input label="Max Radius" value={interpolationRadius} onChangeText={setInterpolationRadius} keyboardType="decimal-pad" placeholder="0.005" />
+              <Text style={s.hintText}>
+                Some Android OEMs (Samsung, Xiaomi, Huawei, OnePlus and others) stop
+                background tasks unless the app is exempted from battery optimisation.
+                If status stays on "Active" but no new scans arrive, check
+                Settings → Apps → NetRange → Battery and set it to Unrestricted.
+              </Text>
 
               <Text style={s.sectionTitle}>Update</Text>
               <StatRow label="Installed" value={`v${updater.currentVersion}`} />
@@ -936,7 +1034,17 @@ const s = StyleSheet.create({
   locCard: { paddingVertical: 8, paddingHorizontal: 12 },
   locRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   locText: { fontSize: 12, color: T.accent2, fontFamily: 'monospace' },
-  simOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8, marginBottom: 4, backgroundColor: 'rgba(255,255,255,0.03)' },
-  simOptionActive: { backgroundColor: 'rgba(124,58,237,0.12)', borderWidth: 1, borderColor: 'rgba(124,58,237,0.3)' },
-  simLabel: { fontSize: 13, fontWeight: '500', color: T.textMuted },
+  hintText: { fontSize: 11, color: T.textMuted, lineHeight: 15, marginBottom: 2 },
+  webState: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: T.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    padding: 24,
+  },
+  webStateTitle: { fontSize: 16, fontWeight: '700', color: T.text },
+  statusCard: { gap: 8 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  statusText: { fontSize: 14, fontWeight: '700', color: T.text },
 });
