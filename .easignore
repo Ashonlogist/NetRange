@@ -8,3 +8,8 @@ node_modules/
 .git/
 *.log
 .DS_Store
+# Built APKs and local helper scripts. .easignore replaces .gitignore for EAS
+# uploads, so anything only excluded in .gitignore would otherwise be shipped
+# to the build servers.
+builds/
+bun-install.sh
