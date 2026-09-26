@@ -789,45 +789,62 @@
             width: min(420px, calc(100vw - 48px));
         }
 
-        /* Inside the app the bar sat at top: 12px, hard against the status bar,
-           where it read as clipped chrome rather than a control. It now lives
-           just above the native menu button and starts collapsed to a single
-           magnifier, expanding on tap -- a full-width field permanently parked
-           over the map was stealing the top of the viewport for no reason. */
+        /* Inside the app this started as a full-width field at top: 12px, which
+           read as clipped chrome and permanently stole the top of the map. It is
+           now a collapsed magnifier that expands on tap.
+
+           It sits top-right, not bottom-right: the bottom-right corner is
+           already crowded by the native menu button and the "Target: <network>"
+           label, and the WebView draws above both, so a control parked there
+           landed on top of the target label and looked broken. The top-right
+           corner is empty on every screen size. */
         body.is-app .map-search {
-            top: auto;
-            bottom: 92px;
+            top: 14px;
+            bottom: auto;
             left: auto;
-            right: 20px;
+            right: 14px;
             transform: none;
             width: auto;
-            max-width: calc(100vw - 40px);
+            max-width: calc(100vw - 28px);
         }
         body.is-app .map-search .search-field {
-            width: 48px;
-            height: 48px;
+            width: 44px;
+            height: 44px;
             padding: 0;
             justify-content: center;
-            border-radius: 50%;
+            border-radius: 22px;
             overflow: hidden;
             cursor: pointer;
             transition: width .22s ease, height .22s ease, padding .22s ease,
                         border-radius .22s ease;
         }
         body.is-app .map-search.expanded .search-field {
-            width: min(420px, calc(100vw - 40px));
+            width: min(420px, calc(100vw - 28px));
             height: auto;
             padding: 10px 14px;
             justify-content: flex-start;
             border-radius: var(--radius-lg);
             cursor: text;
         }
+        /* The collapsed state is *only* the icon. The input has to be hidden
+           outright, not just the clear button and spinner: with the field
+           squeezed to a 44px circle and overflow hidden, the placeholder text
+           did not disappear, it was clipped mid-glyph, so the button rendered as
+           a circle reading "Se". */
+        body.is-app .map-search:not(.expanded) #searchInput {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+            width: 0;
+            padding: 0;
+            border: 0;
+        }
         body.is-app .map-search .search-icon { opacity: 0.85; }
         /* The clear button and spinner only make sense once there is a field. */
         body.is-app .map-search:not(.expanded) .search-clear,
         body.is-app .map-search:not(.expanded) .search-spinner { display: none; }
-        /* Results open downward from the field, which now sits near the bottom
-           edge, so cap them well short of the viewport bottom. */
+        /* Results open downward from a top-anchored field, so cap them against
+           the viewport bottom rather than the top. */
         body.is-app .map-search.expanded .search-results { max-height: min(40vh, 300px); }
         .search-field {
             display: flex;
@@ -846,7 +863,7 @@
             border-color: var(--accent);
             box-shadow: 0 8px 40px rgba(0,0,0,0.4), 0 0 0 3px var(--accent-glow);
         }
-        .search-icon { font-size: 1.05em; line-height: 1; flex-shrink: 0; opacity: 0.6; }
+        .search-icon { font-size: 1.05em; line-height: 1; flex-shrink: 0; opacity: 0.6; display: inline-flex; align-items: center; }
         #searchInput {
             flex: 1;
             min-width: 0;
@@ -1076,7 +1093,19 @@
 
     <div class="map-search" id="mapSearch">
         <div class="search-field">
-            <span class="search-icon">&#128269;</span>
+            <!-- Inline SVG, not the 🔍 emoji. Android renders that as a
+                 full-colour emoji glyph which ignores the surrounding styling
+                 and, shrunk into a 44px circle, looked like a sticker. A
+                 stroke icon inherits currentColor and matches the rest of the
+                 chrome. -->
+            <span class="search-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none"
+                     stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                     stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="7"></circle>
+                    <line x1="16.5" y1="16.5" x2="21" y2="21"></line>
+                </svg>
+            </span>
             <input
                 id="searchInput"
                 type="search"

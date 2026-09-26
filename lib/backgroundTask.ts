@@ -70,8 +70,16 @@ TaskManager.defineTask(BACKGROUND_SCAN_TASK, async () => {
 
     // Cellular. Same reader as the foreground path, so a background scan
     // cannot quietly file itself under a different carrier than the app shows.
+    // It honours the same pinned SIM: a scan taken while the app is closed has
+    // to land on the network the user chose, not on whatever Android thinks the
+    // default data subscription happens to be at 3am.
     const savedCarrier = await SecureStore.getItemAsync('carrierName').catch(() => null);
-    const cellular: any = await readCellular(savedCarrier || undefined);
+    const savedSub = await SecureStore.getItemAsync('preferredSubId').catch(() => null);
+    const preferredSubId = savedSub == null ? null : Number(savedSub);
+    const cellular: any = await readCellular(
+      savedCarrier || undefined,
+      Number.isFinite(preferredSubId) ? preferredSubId : null,
+    );
 
     // Determine target (WiFi or carrier)
     let autoTarget = '';

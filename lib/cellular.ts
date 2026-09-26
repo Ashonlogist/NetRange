@@ -22,7 +22,7 @@ export interface CellularReading {
   overridden?: boolean;
 }
 
-interface NativeSubscription {
+export interface NativeSubscription {
   subscriptionId: number;
   simSlot: number;
   carrierName: string | null;
@@ -39,7 +39,7 @@ interface NativeTelephony {
     defaultSubscriptionId: number | null;
     subscriptions: NativeSubscription[];
   }>;
-  getActiveCellularAsync(): Promise<{
+  getActiveCellularAsync(preferredSubId?: number | null): Promise<{
     available: boolean;
     reason?: 'no_sim' | 'no_permission';
     subscriptionId?: number;
@@ -63,32 +63,59 @@ export function isTelephonyAvailable(): boolean {
 }
 
 /**
- * Ask for READ_PHONE_STATE at runtime.
+ * What the OS will actually do if we ask again.
  *
- * The native module can enumerate SIMs and read a signal level with this, and
- * without it every cellular scan is stored with a null signal -- which the
- * coverage map then discards. So it is a hard requirement for the app doing
- * its actual job, not a nice-to-have. Android only prompts once, and a denial
- * is reported rather than swallowed: silent degradation here is what made the
- * empty map so hard to explain.
+ * 'unknown' is the honest starting value: nothing has been asked yet, so the
+ * app must not claim the permission is missing before it has looked.
  *
- * Best effort by design. A denial is not fatal; the app still records the
- * carrier, just not a signal.
+ * This distinction is the whole reason the app could not get unstuck. Android
+ * prompts once. After a denial with "don't ask again" -- which is what happens
+ * if the user swipes the dialog away twice, and what "clear storage" does not
+ * reliably undo -- `request()` resolves to `never_ask_again` and shows no
+ * dialog at all. Calling it again looks like a dead button, which is exactly
+ * how it presented: the user tapped "Grant permission" and nothing happened,
+ * over and over.
  */
-export async function requestPhonePermission(): Promise<boolean> {
-  if (Platform.OS !== 'android') return false;
+export type PhonePermState = 'unknown' | 'granted' | 'denied' | 'never_ask_again' | 'unavailable';
+
+function permResult(res: string): PhonePermState {
+  if (res === 'granted') return 'granted';
+  if (res === 'never_ask_again') return 'never_ask_again';
+  return 'denied';
+}
+
+/** Read the current permission state without prompting. */
+export async function getPhonePermissionState(): Promise<PhonePermState> {
+  if (Platform.OS !== 'android') return 'unavailable';
   try {
     const { PermissionsAndroid } = require('react-native');
-    if (PermissionsAndroid?.PERMISSIONS?.READ_PHONE_STATE == null) return false;
-    if (await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE)) {
-      return true;
-    }
-    const res = await PermissionsAndroid.request(
-      PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE,
-    );
-    return res === PermissionsAndroid.RESULTS.GRANTED;
+    const p = PermissionsAndroid?.PERMISSIONS?.READ_PHONE_STATE;
+    if (p == null) return 'unavailable';
+    return permResult(await PermissionsAndroid.check(p));
   } catch {
-    return false;
+    return 'unavailable';
+  }
+}
+
+/**
+ * Ask for READ_PHONE_STATE at runtime, and report precisely what happened.
+ *
+ * Best effort by design: a denial is not fatal, the app still records the
+ * carrier, just not a signal. But the *reason* is reported rather than
+ * swallowed, because the difference between "denied" and "never_ask_again" is
+ * the difference between a working prompt and a button that does nothing.
+ */
+export async function requestPhonePermission(): Promise<PhonePermState> {
+  if (Platform.OS !== 'android') return 'unavailable';
+  try {
+    const { PermissionsAndroid } = require('react-native');
+    const p = PermissionsAndroid?.PERMISSIONS?.READ_PHONE_STATE;
+    if (p == null) return 'unavailable';
+    if (await PermissionsAndroid.check(p)) return 'granted';
+    const res = await PermissionsAndroid.request(p);
+    return permResult(res);
+  } catch {
+    return 'unavailable';
   }
 }
 
@@ -134,13 +161,14 @@ async function netInfoReading(): Promise<CellularReading | null> {
  */
 export async function readCellular(
   overrideCarrier?: string,
+  preferredSubId?: number | null,
 ): Promise<CellularReading | null> {
   const n = native();
   let base: CellularReading | null = null;
 
   if (n) {
     try {
-      const active = await n.getActiveCellularAsync();
+      const active = await n.getActiveCellularAsync(preferredSubId ?? null);
       if (active.available) {
         base = {
           carrier: active.carrierName || '',

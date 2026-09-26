@@ -12,6 +12,7 @@ import {
   Pressable,
   Linking,
   ActivityIndicator,
+  AppState,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -22,7 +23,14 @@ import { useUpdater } from '@/components/Updater';
 import * as SecureStore from 'expo-secure-store';
 import { registerBackgroundScan, getBackgroundScanStatus, type BackgroundScanState } from '@/lib/backgroundTask';
 import { postScan } from '@/lib/deviceAuth';
-import { readCellular, requestPhonePermission } from '@/lib/cellular';
+import {
+  readCellular,
+  requestPhonePermission,
+  getPhonePermissionState,
+  listSubscriptions,
+  type PhonePermState,
+  type NativeSubscription,
+} from '@/lib/cellular';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 const PANEL_H = SCREEN_H * 0.7;
@@ -43,6 +51,7 @@ interface CellularInfo {
   networkType: string;
   isConnected: boolean;
   simSlot?: number;
+  subscriptionId?: number;
   overridden?: boolean;
 }
 
@@ -85,6 +94,75 @@ export default function HomeScreen() {
   const [bgBusy, setBgBusy] = useState(false);
 
   const [webError, setWebError] = useState<string | null>(null);
+
+  // --- Phone permission -------------------------------------------------
+  // Tracked rather than assumed. The permission is what stands between the app
+  // and a real signal reading, and the old build never looked: it fired
+  // `void requestPhonePermission()` at startup, threw the answer away, and then
+  // told the user to "grant the Phone permission" on every empty map regardless
+  // of whether they already had. They had. The message was a guess with the
+  // word "permission" in it.
+  const [phonePerm, setPhonePerm] = useState<PhonePermState>('unknown');
+  const [phoneBusy, setPhoneBusy] = useState(false);
+  const [sims, setSims] = useState<NativeSubscription[]>([]);
+  const [preferredSubId, setPreferredSubId] = useState<number | null>(null);
+
+  const refreshPhonePerm = async () => {
+    const st = await getPhonePermissionState();
+    setPhonePerm(st);
+    // The SIM list is only populated once the permission exists; before that it
+    // is empty by design, not by failure.
+    setSims(st === 'granted' ? await listSubscriptions() : []);
+  };
+
+  /**
+   * Ask for the permission, then report what actually happened.
+   *
+   * `never_ask_again` is the case that used to look broken: Android resolves
+   * the request without showing a dialog, so the button appeared dead. That
+   * path now goes to the app's settings page, which is the only thing that
+   * works from there.
+   */
+  const handlePhonePermission = async () => {
+    setPhoneBusy(true);
+    try {
+      const st = await requestPhonePermission();
+      setPhonePerm(st);
+      if (st === 'granted') {
+        setSims(await listSubscriptions());
+      } else if (st === 'never_ask_again') {
+        Alert.alert(
+          'Permission blocked',
+          'Android has stopped showing the Phone permission prompt for this app.\n\n' +
+            'Open NetRange in Settings > Permissions > Phone and allow it, then come back.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Open settings', onPress: () => Linking.openSettings() },
+          ],
+        );
+      }
+    } finally {
+      setPhoneBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    void refreshPhonePerm();
+    // A pinned SIM has to outlive the process, or the choice silently reverts
+    // on next launch and the carrier flips back to the other line.
+    SecureStore.getItemAsync('preferredSubId')
+      .then(v => setPreferredSubId(v == null ? null : Number(v)))
+      .catch(() => {});
+    // Returning from the system settings page is the *only* way out of
+    // never_ask_again, and the app is backgrounded while the user is there.
+    // Without this the UI keeps claiming the permission is missing after
+    // they have just granted it.
+    const sub = AppState.addEventListener('change', s => {
+      if (s === 'active') void refreshPhonePerm();
+    });
+    return () => sub.remove();
+  }, []);
 
   const webViewRef = useRef<WebView>(null);
 
@@ -149,7 +227,7 @@ export default function HomeScreen() {
     const startTracking = async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted' || !mounted) return;
-      void requestPhonePermission();
+      void requestPhonePermission().then(setPhonePerm);
       const sub = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, distanceInterval: 10, timeInterval: 15000 },
         (loc) => {
@@ -220,7 +298,7 @@ export default function HomeScreen() {
         // old NetInfo path reported whichever SIM Android considered default,
         // which on a dual-SIM handset meant scans filed under the wrong
         // carrier, and it had no signal field at all.
-        cellular = await readCellular(carrierOverride || savedCarrier || undefined);
+        cellular = await readCellular(carrierOverride || savedCarrier || undefined, preferredSubId);
 
         let autoTarget = '';
         const connectedWifi = wifi.find(n => n.isConnected);
@@ -259,7 +337,7 @@ export default function HomeScreen() {
       } catch {}
     }, 120000);
     return () => clearInterval(interval);
-  }, [targetSsid, apiUrl, deviceId]);
+  }, [targetSsid, apiUrl, deviceId, preferredSubId]);
 
   const [coverageMetric, setCoverageMetricState] = useState<'speed' | 'signal'>('speed');
 
@@ -300,7 +378,7 @@ export default function HomeScreen() {
         setScanning(false);
         return;
       }
-      void requestPhonePermission();
+      void requestPhonePermission().then(setPhonePerm);
       let loc: Location.LocationObject;
       try {
         loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
@@ -333,7 +411,7 @@ export default function HomeScreen() {
       }
 
       const savedCarrier = await SecureStore.getItemAsync('carrierName').catch(() => null);
-      cellular = await readCellular(carrierOverride || savedCarrier || undefined);
+      cellular = await readCellular(carrierOverride || savedCarrier || undefined, preferredSubId);
 
       setWifiNetworks(wifi);
       setCellularInfo(cellular);
@@ -477,18 +555,41 @@ export default function HomeScreen() {
       }
       const hData = await hResp.json();
       if (!hData.points || hData.points.length === 0) {
-        // The old message was a flat "no data", which is what you saw while
-        // every cellular scan was being stored with a null signal: the server
-        // was discarding rows the app had happily saved. Say which of the two
-        // reasons it is, so this is diagnosable instead of a dead end.
+        // "No data" was true and useless: the server was quietly discarding
+        // rows the app had saved, and the app had no way to tell the user why.
+        // Now the *reason* is read off the actual permission state rather than
+        // assumed. Telling someone to "grant the Phone permission" they already
+        // granted is worse than saying nothing -- it sends them off to clear
+        // storage again.
         const skipped = hData.skipped_no_signal || 0;
-        Alert.alert(
-          'No Mappable Data',
-          skipped > 0
-            ? `${skipped} scan${skipped === 1 ? '' : 's'} saved for ${targetSsid}, but none carried a signal reading, so there is nothing to draw.\n\n` +
-              'Android only reports a cellular signal level once the Phone permission is granted. Grant it, then scan again.'
-            : `Nothing saved for "${targetSsid}" yet. Tap Save at a few different locations first.`,
-        );
+        if (skipped > 0 && phonePerm !== 'granted') {
+          Alert.alert(
+            'No Mappable Data',
+            `${skipped} scan${skipped === 1 ? '' : 's'} saved for ${targetSsid}, but none carried a signal reading.\n\n` +
+              'Android only reports a cellular signal level once the Phone permission is granted, and this app ' +
+              'does not have it' +
+              (phonePerm === 'never_ask_again'
+                ? '. Android has stopped prompting for it, so use the Phone permission row in the panel to open settings.'
+                : '. Use the Phone permission row in the panel to grant it.') +
+              '\n\nScans already saved cannot be repaired -- scan again afterwards.',
+          );
+        } else if (skipped > 0) {
+          // Permission is fine, so the silence is the OS's, not ours. Say that
+          // plainly instead of pointing at a permission that is already granted.
+          Alert.alert(
+            'No Signal Reading',
+            `The Phone permission is granted, but Android returned no signal level on ${skipped} saved ` +
+              `scan${skipped === 1 ? '' : 's'} for ${targetSsid}.\n\n` +
+              'This happens when the SIM is registered but idle, and on some devices below Android 10, which does not ' +
+              'expose a dBm reading at all.\n\nMove to a spot with bars, make sure mobile data is actually on for that SIM, ' +
+              'then scan again.',
+          );
+        } else {
+          Alert.alert(
+            'Nothing Saved Yet',
+            `No scans saved for "${targetSsid}" yet. Tap Save at a few different locations first.`,
+          );
+        }
         setGenerating(false);
         return;
       }
@@ -748,6 +849,98 @@ export default function HomeScreen() {
                   </TouchableOpacity>
                   <Text style={{ fontSize: 10, color: T.textMuted, textAlign: 'center', marginTop: 2 }}>
                     Long press to rename carrier
+                  </Text>
+                </>
+              )}
+
+              {/* Phone permission. Previously this existed only as a silent
+                  `void requestPhonePermission()` at startup with no UI at all,
+                  so there was nothing to tap, nothing to see, and no way to tell
+                  a granted permission from a denied one. The "Grant permission"
+                  button people found and pressed was for *background scanning*,
+                  a different permission entirely -- which is why pressing it did
+                  nothing about phone state. */}
+              {Platform.OS === 'android' && phonePerm !== 'granted' && (
+                <Card style={[s.permCard, phonePerm === 'never_ask_again' && s.permCardBlocked]}>
+                  <View style={s.networkRow}>
+                    <View style={s.networkInfo}>
+                      <View style={s.networkNameRow}>
+                        <Ionicons
+                          name="shield-half-outline"
+                          size={13}
+                          color={phonePerm === 'never_ask_again' ? T.orange : T.textMuted}
+                        />
+                        <Text style={s.networkSsid}>Phone permission</Text>
+                        {phonePerm === 'never_ask_again' && <Badge label="Blocked" variant="warning" />}
+                      </View>
+                      <Text style={s.networkMeta}>
+                        {phonePerm === 'never_ask_again'
+                          ? 'Android will not prompt again. Enable it in settings.'
+                          : phonePerm === 'unknown'
+                            ? 'Checking...'
+                            : 'Needed to read your carrier and signal level.'}
+                      </Text>
+                    </View>
+                    <Button
+                      title={phoneBusy ? '...' : phonePerm === 'never_ask_again' ? 'Settings' : 'Grant'}
+                      onPress={phonePerm === 'never_ask_again' ? () => Linking.openSettings() : handlePhonePermission}
+                      disabled={phoneBusy}
+                      variant="secondary"
+                    />
+                  </View>
+                </Card>
+              )}
+
+              {/* SIM picker. Auto-detection reads Android's *default data*
+                  subscription, which is not the same thing as the SIM the user
+                  is standing on -- a phone with data enabled on both SIMs, or a
+                  default that was never switched, will report the other line.
+                  That is not a bug to be detected but a choice the user has to
+                  be able to make, so every SIM the OS describes is offered and
+                  the chosen one is pinned for background scans too. */}
+              {sims.length > 1 && (
+                <>
+                  <Text style={s.sectionTitle}>Which SIM is in use?</Text>
+                  {sims.map(sim => {
+                    const chosen = preferredSubId === null
+                      ? sim.subscriptionId === cellularInfo?.subscriptionId
+                      : preferredSubId === sim.subscriptionId;
+                    return (
+                      <TouchableOpacity
+                        key={sim.subscriptionId}
+                        activeOpacity={0.7}
+                        onPress={async () => {
+                          const next = preferredSubId === sim.subscriptionId ? null : sim.subscriptionId;
+                          setPreferredSubId(next);
+                          if (next == null) await SecureStore.deleteItemAsync('preferredSubId').catch(() => {});
+                          else await SecureStore.setItemAsync('preferredSubId', String(next));
+                        }}
+                      >
+                        <Card style={[s.networkCard, chosen && s.networkCardSelected]}>
+                          <View style={s.networkRow}>
+                            <View style={s.networkInfo}>
+                              <View style={s.networkNameRow}>
+                                {chosen && <Ionicons name="checkmark-circle" size={12} color={T.green} />}
+                                <Text style={[s.networkSsid, chosen && { color: T.green }]}>
+                                  {sim.carrierName || 'Unknown carrier'}
+                                </Text>
+                                <Badge label={`SIM${sim.simSlot + 1}`} variant="info" />
+                                {sim.isDefault && <Badge label="Android default" variant="default" />}
+                              </View>
+                              <Text style={s.networkMeta}>
+                                {sim.networkType || 'network unknown'}
+                                {sim.signalDbm != null ? ` · ${Math.round(sim.signalDbm)} dBm` : ' · no signal reading'}
+                              </Text>
+                            </View>
+                          </View>
+                        </Card>
+                      </TouchableOpacity>
+                    );
+                  })}
+                  <Text style={{ fontSize: 10, color: T.textMuted, textAlign: 'center', marginTop: 2 }}>
+                    {preferredSubId === null
+                      ? 'Following the SIM with mobile data. Tap to pin one.'
+                      : 'Pinned. Scans always record this SIM. Tap again to follow automatically.'}
                   </Text>
                 </>
               )}
@@ -1033,6 +1226,15 @@ const s = StyleSheet.create({
   },
   networkCard: { padding: 12 },
   networkCardSelected: { borderColor: T.green, borderWidth: 1 },
+  permCard: {
+    backgroundColor: 'rgba(245,158,11,0.07)',
+    borderColor: 'rgba(245,158,11,0.25)',
+    marginTop: 8,
+  },
+  permCardBlocked: {
+    backgroundColor: 'rgba(239,68,68,0.07)',
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
   networkRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   networkInfo: { flex: 1, marginRight: 10 },
   networkNameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 },

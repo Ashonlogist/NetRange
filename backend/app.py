@@ -57,7 +57,7 @@ app.secret_key = DASHBOARD_SECRET
 # reads it per request so the deadline passes without a redeploy. Do not cache
 # it at import time; two sources of truth for a security deadline is a trap.
 
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.5.1"
 # The APK is published as a GitHub release asset, not served from this
 # service: the build output is gitignored, so a git-deployed instance can
 # never have it on disk. Override with APK_URL if hosting ever changes.
@@ -96,6 +96,13 @@ def download_file(filename):
 # heading. Keying them to the version makes that impossible: a new version with
 # no entry gets an honest fallback instead of a lie.
 RELEASE_NOTES = {
+    "1.5.1": [
+        "Phone permission: a real row that says whether it is granted, and a button that actually works",
+        "Phone permission: if Android has blocked the prompt, it opens settings instead of doing nothing",
+        "SIM: pick which line you are on, and scans stay on it",
+        "Generate Map: stops telling you to grant a permission you already granted",
+        "Map: search icon moved off the network label, and no longer renders as a circle reading 'Se'",
+    ],
     "1.5.0": [
         "Carrier: reads the SIM actually in use, not Android's default one",
         "Coverage: cellular signal is now measured, so cellular maps can be drawn",
