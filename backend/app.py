@@ -90,17 +90,33 @@ def download_file(filename):
     abort(404)
 
 
+# Release notes, keyed by version. These used to be one flat list beside
+# APP_VERSION, which meant bumping the version shipped the *previous* release's
+# notes -- the in-app prompt cheerfully described 1.4.2's changes under a 1.4.3
+# heading. Keying them to the version makes that impossible: a new version with
+# no entry gets an honest fallback instead of a lie.
+RELEASE_NOTES = {
+    "1.4.3": [
+        "Carrier: override can be cleared again",
+        "Background scanning: shows why it is not running",
+        "WebView: real error state with Retry, instead of failing silently",
+        "Settings: removed interpolation options that never took effect",
+    ],
+    "1.4.2": [
+        "Scan: tap networks directly as target (no text input)",
+        "Cellular network detection improved",
+        "Coverage map: browser warnings hidden in-app",
+        "Settings: API URL hidden",
+    ],
+}
+
+
 @app.route("/api/version")
 def api_version():
     return jsonify({
         "version": APP_VERSION,
         "apkUrl": APK_URL,
-        "notes": [
-            "Scan: tap networks directly as target (no text input)",
-            "Cellular network detection improved",
-            "Coverage map: browser warnings hidden in-app",
-            "Settings: API URL hidden",
-        ],
+        "notes": RELEASE_NOTES.get(APP_VERSION, []),
     })
 
 
