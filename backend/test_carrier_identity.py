@@ -146,6 +146,44 @@ class ScanMatches(unittest.TestCase):
     def test_a_legacy_row_still_matches_its_display_name(self):
         self.assertTrue(scan_matches(scan("MTN GH"), "mtn gh"))
 
+    def test_a_query_is_normalised_the_same_way_the_key_is(self):
+        # The bug this locks down: the row's key is lowercased but the query
+        # was not, so any label with capitals matched nothing. The old
+        # exact-match filter had the same flaw, which made "MTN GH" -- a real
+        # display name on the device -- unfilterable.
+        row = scan("MTN GH")
+        self.assertTrue(scan_matches(row, "MTN GH"))
+        self.assertTrue(scan_matches(row, "  MTN GH  "))
+        self.assertTrue(scan_matches(row, "mtn gh"))
+        self.assertTrue(scan_matches(scan("Telecel"), "TELECEL"))
+
+    def test_a_backfilled_row_matches_both_of_its_names(self):
+        # ssid keeps what the phone showed; carrier_name is the canonical
+        # label. Filtering on either has to find the row.
+        row = scan("MTN GH", numeric="62001")
+        row["carrier_name"] = "MTN"
+        self.assertTrue(scan_matches(row, "MTN"))
+        self.assertTrue(scan_matches(row, "MTN GH"))
+        self.assertTrue(scan_matches(row, "62001"))
+
+    def test_the_operator_name_matches_even_with_no_name_stored(self):
+        # Nothing recorded but the PLMN, and the UI shows "MTN".
+        row = scan(None, numeric="62001")
+        self.assertTrue(scan_matches(row, "MTN"))
+        self.assertTrue(scan_matches(row, "62001"))
+        # But the SIM's own raw label is not recoverable from a PLMN alone, so
+        # it must NOT match. Inventing that association is the failure this
+        # whole mechanism exists to prevent.
+        self.assertFalse(scan_matches(row, "MTN GH"))
+
+    def test_a_name_that_is_not_this_carrier_does_not_match(self):
+        row = scan("MTN GH", numeric="62001")
+        self.assertFalse(scan_matches(row, "Telecel"))
+        self.assertFalse(scan_matches(row, "62002"))
+
+    def test_a_whitespace_only_filter_is_treated_as_no_filter(self):
+        self.assertTrue(scan_matches(scan("MTN GH"), "   "))
+
     def test_empty_filter_matches_everything(self):
         self.assertTrue(scan_matches(scan("MTN GH"), ""))
         self.assertTrue(scan_matches(scan("MTN GH"), None))
@@ -155,13 +193,23 @@ class ScanMatches(unittest.TestCase):
 
 
 class PreparePointsFiltering(unittest.TestCase):
-    def test_a_rebrand_does_not_split_filtered_coverage(self):
-        # Two rows, one network, one recorded before the numeric was stored and
-        # one after. Filtering on the label must return both.
+    def test_a_rebrand_does_not_drop_rows_from_a_name_filter(self):
+        # Two rows for one network: one recorded before the numeric existed and
+        # one after. Filtering on the label must keep both -- a rename must not
+        # silently drop half a network's history.
         old = scan("Telecel", lat=5.60, dbm=-80)
         new = scan("Vodafone Ghana", identity="62002", numeric="62002",
                    lat=5.61, dbm=-85)
-        self.assertEqual(len(prepare_points([old, new], "telecel")), 1)
+        self.assertEqual(len(prepare_points([old, new], "telecel")), 2)
+        self.assertEqual(len(prepare_points([old, new], "Telecel")), 2)
+
+    def test_a_plmn_filter_only_returns_rows_that_actually_carry_it(self):
+        # The honest limit of the backfill: a row stored before carrier_numeric
+        # existed cannot answer "62002?", so it is excluded rather than guessed.
+        # The migration resolves those rows once, in carrier_from_name().
+        old = scan("Telecel", lat=5.60, dbm=-80)
+        new = scan("Vodafone Ghana", identity="62002", numeric="62002",
+                   lat=5.61, dbm=-85)
         self.assertEqual(len(prepare_points([old, new], "62002")), 1)
 
     def test_case_variant_collapse_end_to_end(self):

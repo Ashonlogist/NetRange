@@ -594,11 +594,31 @@ def scan_group_key(scan):
 def scan_matches(scan, ssf):
     """Whether a scan belongs to a filter.
 
-    Accepts either the stable key or the display name, so a UI can filter on
-    "Telecel" or on "62002" and get the same rows.
+    Accepts either the stable key or any label the UI might be showing, so a
+    filter on "Telecel" and one on "62002" return the same rows.
+
+    The query is normalised the same way the row's key is. Comparing a
+    lowercased key against a raw query silently failed for any label carrying
+    capitals or padding -- "MTN GH" matched nothing, and the old exact-match
+    filter had the same flaw, so a carrier whose display name is not already
+    lowercase was simply unfilterable.
     """
-    if not ssf:
+    if not ssf or not str(ssf).strip():
+      return True
+    q = str(ssf).strip().lower()
+    if scan_group_key(scan) == q:
+      return True
+    # Both the name the phone showed and the name we canonicalised it to, since
+    # a backfilled row carries "MTN GH" in ssid and "MTN" in carrier_name.
+    for field in ("ssid", "carrier_name"):
+      v = scan.get(field)
+      if v and str(v).strip().lower() == q:
         return True
-    if scan_group_key(scan) == ssf:
+    # Finally the operator's canonical name for this PLMN, so a filter on "MTN"
+    # finds 62001 rows even when no name was ever recorded for them.
+    plmn = normalize_plmn(scan.get("carrier_numeric"))
+    if plmn and plmn.startswith("620"):
+      canonical = GHANA_MNC.get(plmn[3:])
+      if canonical and canonical.lower() == q:
         return True
-    return str(scan.get("ssid", "")).strip().lower() == ssf
+    return False
