@@ -925,3 +925,63 @@ class TestDomainVerification(unittest.TestCase):
                         headers={"X-Netrange-Admin": "1",
                                  "Authorization": self._basic()})
         self.assertEqual(r.status_code, 404)
+
+
+class TestOwnerDashboardContext(unittest.TestCase):
+    """
+    Every owner route that re-renders the dashboard must pass the same context.
+
+    The four error paths each built it by hand and all omitted `stats`, which
+    the template indexes as stats[site.id]. Jinja raises UndefinedError on that,
+    so an ordinary failure -- a rejected domain, a DNS record that has not
+    propagated -- returned a 500 instead of a page explaining the problem. The
+    success paths passed stats and masked it, which is why a green suite did not
+    catch it; it was found by hitting the route in production.
+    """
+
+    def setUp(self):
+        self.fake = _Db()
+        db._client = self.fake
+        appmod.get_client = lambda: self.fake
+        owner_auth.OWNER_SESSION_SECRET = "test-owner-session-secret"
+        owner_auth._verify_last_check.clear()
+        self.c = appmod.app.test_client()
+        self.oid, _ = owner_auth.create_owner("alpha", "a-long-enough-pass")
+        owner_auth.set_approval(self.oid, True, "tester")
+        self.site, _ = owner_auth.register_site(self.oid, "alpha.example.com", "Alpha")
+        self.c.post("/owner/login", data={"username": "alpha",
+                                          "password": "a-long-enough-pass"})
+        body = self.c.get("/owner/").get_data(as_text=True)
+        import re
+        self.csrf = re.search(r'name="csrf_token" value="([^"]+)"', body).group(1)
+
+    def _assert_page_not_a_crash(self, r, what):
+        self.assertNotEqual(r.status_code, 500, f"{what} returned a 500")
+        self.assertIn(r.status_code, (200, 302, 400), what)
+
+    def test_dns_check_failure_renders_a_page(self):
+        r = self.c.post(f"/owner/sites/{self.site['id']}/verify/start",
+                        data={"csrf_token": self.csrf})
+        self._assert_page_not_a_crash(r, "start verification")
+        r = self.c.post(f"/owner/sites/{self.site['id']}/verify",
+                        data={"csrf_token": self.csrf})
+        self._assert_page_not_a_crash(r, "failing DNS check")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("No matching TXT record", r.get_data(as_text=True))
+
+    def test_bad_domain_renders_a_page(self):
+        r = self.c.post("/owner/sites", data={"csrf_token": self.csrf,
+                                              "domain": "not a domain"})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("bare domain", r.get_data(as_text=True))
+
+    def test_verification_error_page_still_shows_the_dashboard(self):
+        """A failure must not cost the venue their instructions, or they cannot
+        act on what the page is telling them."""
+        self.c.post(f"/owner/sites/{self.site['id']}/verify/start",
+                    data={"csrf_token": self.csrf})
+        r = self.c.post(f"/owner/sites/{self.site['id']}/verify",
+                        data={"csrf_token": self.csrf})
+        body = r.get_data(as_text=True)
+        self.assertIn("_netrange.alpha.example.com", body)
+        self.assertIn("alpha.example.com", body)

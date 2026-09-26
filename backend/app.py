@@ -1415,6 +1415,30 @@ def owner_site_stats(sites, scans):
     return out
 
 
+def _owner_dashboard_response(error=None, status=200):
+    """
+    Render the owner dashboard with a complete context.
+
+    Four routes hand-built this context before, and they had drifted: every error
+    path omitted `stats`, which the template indexes as stats[site.id]. Jinja
+    raises UndefinedError on that, so an ordinary failure -- a rejected domain, a
+    DNS record that has not propagated -- produced a 500 instead of a page
+    explaining the problem. The success paths passed stats and so masked it,
+    which is why a green test suite did not catch it; it surfaced in production.
+    """
+    sites = owner_sites(g.owner_id)
+    scans = load_widget_scans([s["id"] for s in sites]) if sites else []
+    return render_template(
+        "owner-dashboard.html",
+        sites=sites,
+        csrf=csrf_token(),
+        error=error,
+        stats=owner_site_stats(sites, scans),
+        min_contributors=analytics.MIN_DEVICES_PER_CELL,
+        widget_js_url=request.url_root.rstrip("/") + "/widget.js",
+    ), status
+
+
 @app.route("/owner/")
 @owner_required
 def owner_dashboard():
@@ -1428,16 +1452,7 @@ def owner_dashboard():
     """
     if not owner_approved(g.owner_id):
         return render_template("owner-pending.html", csrf=csrf_token()), 200
-    sites = owner_sites(g.owner_id)
-    scans = load_widget_scans([s["id"] for s in sites]) if sites else []
-    return render_template(
-        "owner-dashboard.html",
-        sites=sites,
-        csrf=csrf_token(),
-        stats=owner_site_stats(sites, scans),
-        min_contributors=analytics.MIN_DEVICES_PER_CELL,
-        widget_js_url=request.url_root.rstrip("/") + "/widget.js",
-    )
+    return _owner_dashboard_response()
 
 
 @app.route("/owner/sites", methods=["POST"])
@@ -1447,8 +1462,7 @@ def owner_add_site():
     check_csrf()
     site, error = register_site(g.owner_id, request.form.get("domain"), request.form.get("label"))
     if error:
-        return render_template("owner-dashboard.html", sites=owner_sites(g.owner_id),
-                               csrf=csrf_token(), error=error), 400
+        return _owner_dashboard_response(error, 400)
     return redirect("/owner/")
 
 
@@ -1460,8 +1474,7 @@ def owner_start_verification(site_id):
     check_csrf()
     site, error = request_site_verification(g.owner_id, site_id)
     if error:
-        return render_template("owner-dashboard.html", sites=owner_sites(g.owner_id),
-                               csrf=csrf_token(), error=error), 400
+        return _owner_dashboard_response(error, 400)
     return redirect("/owner/")
 
 
@@ -1473,8 +1486,7 @@ def owner_run_verification(site_id):
     check_csrf()
     _, error = run_site_verification(g.owner_id, site_id)
     if error:
-        return render_template("owner-dashboard.html", sites=owner_sites(g.owner_id),
-                               csrf=csrf_token(), error=error), 400
+        return _owner_dashboard_response(error, 400)
     return redirect("/owner/")
 
 
