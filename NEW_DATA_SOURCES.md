@@ -303,11 +303,8 @@ layer, not the only one.
   `approved_by` / `decision_note` columns, and `widget_sites.lat` / `lon`. The
   script is idempotent, so re-running it is safe. It remains separate from
   `db/schema.sql`.
-- **Domain ownership is not proven.** An approved owner can register *any*
-  domain and will receive that domain's widget traffic. There is no DNS TXT or
-  file-placement check, so an approved venue could claim a competitor's domain.
-  This is the weakest remaining control and should be closed before the service
-  is offered commercially — see the note at the end of this file.
+- **A site must be verified before it collects anything.** Registering a domain
+  is not permission to collect from it. See section 8.
 - **The add-site form does not collect `lat`/`lon` or `sms_carrier` yet**, so a
   freshly registered site is not eligible for SMS attribution and cannot have
   SMS reporting enabled meaningfully. Both columns exist; only the UI is
@@ -316,3 +313,50 @@ layer, not the only one.
   the visitor a prefilled `mailto:`; there is no SMTP configuration. If a venue
   closes the mail client, the request is still in `venue_requests`.
 - Required env vars, none with defaults: `OWNER_SESSION_SECRET`, `SMS_PHONE_PEPPER`.
+
+---
+
+## 8. Domain ownership verification
+
+**The problem.** Approval answers "is this person a real venue?". It does not
+answer "does this person control `example.com`?". An approved owner could
+register any domain and collect that domain's traffic — a competitor's
+included. Under a per-venue, scale-based pricing model that is not a nuisance
+bug; it is the central promise failing, because a venue pays for reports about
+*its* network and would be handed someone else's.
+
+**The proof.** A DNS TXT record containing an unguessable per-site token:
+
+    _netrange.<the-domain>   TXT   "<token>"
+
+Adding one requires control of the domain's DNS, which is exactly the claim
+being made. A fixed child name is used even for an apex domain, so the
+instruction is uniform and the token never lands in the record a domain's
+SPF/DKIM policy lives in.
+
+The resolver is **DNS-over-HTTPS** (`dns.google/resolve`), not UDP/53: cloud
+PaaS commonly blocks outbound port 53, and DoH needs no new dependency. A
+resolver that is unreachable, slow, or returns anything unparseable is a
+**failed** check, never a pass. A non-TXT answer is never a pass either — an A
+record matching the token proves nothing.
+
+**Where it is enforced.** `site_for_domain()` filters on
+`verification_status = 'verified'` and is the only lookup the widget endpoint
+uses. An unverified domain is invisible there, so no other route can be used to
+collect from one. It is answered with the same `unregistered origin` `403` as a
+domain nobody claimed, so the response does not confirm that a pending site
+exists.
+
+**Hand verification.** Some venues run a captive-portal network whose operator
+will not add a record. `POST /api/sites/<id>/verification` lets a person verify
+by hand, under the same Basic auth + `X-Netrange-Admin` guard as the other
+admin decisions, and it unlocks collection exactly as the DNS path does. The
+same route un-verifies, which stops collection immediately.
+
+**Not just an obscurity check.** The token is 24 bytes of `secrets` entropy,
+compared with `hmac.compare_digest`. The resolver is rate limited to one lookup
+per site per 20s, since it is the only outbound call an owner can aim at will.
+Minting a token is free and unscoped by cooldown. A failed check *keeps* the
+token, because the usual cause is a typo or slow propagation and the owner
+should retry the same value; a successful one clears it, since a live token has
+no reason to outlive its use.

@@ -209,3 +209,41 @@ alter table venue_requests enable row level security;
 -- alone is not a location.
 alter table widget_sites add column if not exists lat double precision;
 alter table widget_sites add column if not exists lon double precision;
+
+-- ---------------------------------------------------------------------------
+-- Domain ownership verification
+-- ---------------------------------------------------------------------------
+-- An approved owner could otherwise register ANY domain and collect that
+-- domain's widget traffic -- including a competitor's. Approval says "this
+-- person is a real venue", not "this person controls example.com", and under a
+-- per-venue, scale-based pricing model that gap lets an approved venue poach a
+-- rival's data.
+--
+-- Proof is a TXT record containing an unguessable per-site token. A venue can
+-- add one only with control of the domain's DNS, which is the thing being
+-- claimed. Admin can also verify by hand, for venues that cannot touch DNS
+-- (managed captive-portal networks, for instance).
+--
+-- The token lives on the site row, not in a session, so verification survives a
+-- restart and an owner who returns days later can still finish the check.
+ALTER TABLE widget_sites
+  ADD COLUMN IF NOT EXISTS verification_token   text,
+  ADD COLUMN IF NOT EXISTS verification_status  text NOT NULL DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS verification_method text,
+  ADD COLUMN IF NOT EXISTS verified_at          timestamptz,
+  ADD COLUMN IF NOT EXISTS verified_by         text;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conname = 'widget_sites_verification_status_check') THEN
+    ALTER TABLE widget_sites ADD CONSTRAINT widget_sites_verification_status_check
+      CHECK (verification_status IN ('pending', 'verified', 'failed'));
+  END IF;
+END $$;
+
+-- Partial: only pending sites are ever looked up by token, and the index stays
+-- small as the verified set grows.
+CREATE INDEX IF NOT EXISTS widget_sites_verification_token_idx
+  ON widget_sites (verification_token)
+  WHERE verification_token IS NOT NULL;

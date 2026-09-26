@@ -231,9 +231,12 @@ class WidgetScanTests(unittest.TestCase):
         db._client = self.fake
         appmod.get_client = lambda: self.fake
         owner_auth._WIDGET_ATTEMPTS.clear()
+        # Verified, because these tests are about the scan itself. A site that
+        # has merely been registered collects nothing, which is the point of
+        # TestDomainVerification.
         self.fake.table("widget_sites").insert(
             {"id": 1, "owner_id": 1, "domain": "volta.example.com", "label": "Volta",
-             "sms_reporting_enabled": False}
+             "sms_reporting_enabled": False, "verification_status": "verified"}
         ).execute()
         self.client = appmod.app.test_client()
 
@@ -545,3 +548,307 @@ class TestApprovalGate(unittest.TestCase):
         # and the response must offer the prefilled email
         self.assertIn("netrange@ashonlogist.website",
                       r.get_data(as_text=True))
+
+
+def _b64(user="admin", pw="admin-pw"):
+    import base64
+    return "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()
+
+
+class TestDomainVerification(unittest.TestCase):
+    """
+    Registering a domain is not the same as being able to collect from it.
+
+    Approval answers "is this a real venue"; only DNS answers "does this venue
+    control example.com". Without the second, an approved account registers a
+    competitor's domain and receives its visitors' data, which under a
+    per-venue pricing model is the central promise failing.
+    """
+
+    def setUp(self):
+        self.fake = _Db()
+        db._client = self.fake
+        appmod.get_client = lambda: self.fake
+        owner_auth.OWNER_SESSION_SECRET = "test-owner-session-secret"
+        owner_auth._verify_last_check.clear()
+        appmod.DASHBOARD_USERNAME = "admin"
+        appmod.DASHBOARD_PASS = "admin-pw"
+        self.c = appmod.app.test_client()
+        self.oid, _ = owner_auth.create_owner("alpha", "a-long-enough-pass")
+        self.oid2, _ = owner_auth.create_owner("beta", "a-long-enough-pass")
+        for o in (self.oid, self.oid2):
+            owner_auth.set_approval(o, True, "tester")
+
+    @staticmethod
+    def _basic():
+        return _b64()
+
+    def _site(self, owner=None, domain="alpha.example.com"):
+        site, err = owner_auth.register_site(owner or self.oid, domain, "Alpha")
+        self.assertIsNone(err, err)
+        return site
+
+    # --- the enforcement that matters -------------------------------------
+
+    def test_unverified_site_is_invisible_to_the_widget_endpoint(self):
+        site = self._site()
+        self.assertEqual(site["verification_status"], "pending")
+        self.assertIsNone(owner_auth.site_for_domain("alpha.example.com"),
+                          "an unverified domain must not resolve for collection")
+
+    def test_verified_site_is_visible(self):
+        self._site()
+        owner_auth.set_site_verification(self.fake.rows("widget_sites")[0]["id"],
+                                         True, "admin")
+        self.assertIsNotNone(owner_auth.site_for_domain("alpha.example.com"))
+
+    def test_unverified_site_gets_the_same_answer_as_an_unclaimed_domain(self):
+        self._site()
+        self.c.post("/owner/login", data={"username": "alpha",
+                                          "password": "a-long-enough-pass"})
+        head = {"Origin": "https://alpha.example.com"}
+        unverified = self.c.post("/api/widget-scan", json={
+            "lat": 5.6, "lon": -0.2, "network": {"type": "wifi"}}, headers=head)
+        unclaimed = self.c.post("/api/widget-scan", json={
+            "lat": 5.6, "lon": -0.2, "network": {"type": "wifi"}},
+            headers={"Origin": "https://nobody.example.com"})
+        self.assertEqual(unverified.status_code, 403)
+        self.assertEqual(unverified.status_code, unclaimed.status_code)
+        self.assertEqual(unverified.get_json(), unclaimed.get_json(),
+                         "must not confirm that a pending site exists")
+
+    def _site_token(self, owner, site_id):
+        """Read a token as a plain string. The stub returns the live row, so
+        holding a reference would show the *current* value, not the one issued."""
+        site, err = owner_auth.request_site_verification(owner, site_id)
+        self.assertIsNone(err, err)
+        return site["verification_token"]
+
+    # --- the token --------------------------------------------------------
+
+    def test_token_is_unguessable(self):
+        site, _ = owner_auth.request_site_verification(self.oid, self._site()["id"])
+        self.assertGreaterEqual(len(site["verification_token"]), 24)
+
+    def test_each_start_mints_a_fresh_token(self):
+        sid = self._site()["id"]
+        first = self._site_token(self.oid, sid)
+        second = self._site_token(self.oid, sid)
+        self.assertNotEqual(first, second)
+
+    def test_token_is_cleared_once_verified(self):
+        sid = self._site()["id"]
+        owner_auth.request_site_verification(self.oid, sid)
+        owner_auth.set_site_verification(sid, True, "admin")
+        self.assertIsNone(self.fake.rows("widget_sites")[0]["verification_token"],
+                          "a live token has no reason to outlive its use")
+
+    def test_txt_name_is_a_fixed_child_of_the_domain(self):
+        self.assertEqual(owner_auth.verification_txt_name("wifi.example.com"),
+                         "_netrange.wifi.example.com")
+        self.assertEqual(owner_auth.verification_txt_name("example.com"),
+                         "_netrange.example.com")
+
+    # --- DNS lookup -------------------------------------------------------
+
+    def _dns_returns(self, answers, ok=True):
+        def fake_get(url, params=None, timeout=None):
+            if not ok:
+                raise OSError("resolver unreachable")
+            return type("R", (), {
+                "status_code": 200,
+                "json": lambda s: {"Status": 0, "Answer": answers},
+            })()
+        return fake_get
+
+    def test_matching_txt_verifies(self):
+        sid = self._site()["id"]
+        site, _ = owner_auth.request_site_verification(self.oid, sid)
+        token = site["verification_token"]
+        owner_auth.requests.get = self._dns_returns(
+            [{"name": "_netrange.alpha.example.com", "type": 16,
+              "data": f'"{token}"'}])
+        got, err = owner_auth.run_site_verification(self.oid, sid)
+        self.assertIsNone(err)
+        self.assertEqual(got["verification_status"], "verified")
+        self.assertEqual(got["verification_method"], "owner-dns")
+
+    def test_unrelated_txt_does_not_verify(self):
+        sid = self._site()["id"]
+        owner_auth.request_site_verification(self.oid, sid)
+        owner_auth.requests.get = self._dns_returns([
+            {"name": "alpha.example.com", "type": 16, "data": '"v=spf1 -all"'},
+            {"name": "alpha.example.com", "type": 16, "data": '"some-other-token"'},
+        ])
+        _, err = owner_auth.run_site_verification(self.oid, sid)
+        self.assertIsNotNone(err)
+        self.assertEqual(self.fake.rows("widget_sites")[0]["verification_status"],
+                         "pending")
+
+    def test_resolver_failure_is_not_a_pass(self):
+        sid = self._site()["id"]
+        owner_auth.request_site_verification(self.oid, sid)
+        owner_auth.requests.get = self._dns_returns([], ok=False)
+        _, err = owner_auth.run_site_verification(self.oid, sid)
+        self.assertIsNotNone(err, "an unreachable resolver must not verify anything")
+        self.assertEqual(self.fake.rows("widget_sites")[0]["verification_status"],
+                         "pending")
+
+    def test_non_txt_answers_are_ignored(self):
+        sid = self._site()["id"]
+        site, _ = owner_auth.request_site_verification(self.oid, sid)
+        owner_auth.requests.get = self._dns_returns([
+            {"name": "x", "type": 1, "data": f'{site["verification_token"]}'},
+        ])
+        _, err = owner_auth.run_site_verification(self.oid, sid)
+        self.assertIsNotNone(err, "an A record is not proof of control")
+
+    def test_token_survives_a_failed_check(self):
+        """The usual failure is a typo or slow propagation, so the owner retries
+        the same value rather than being handed a new one each time."""
+        sid = self._site()["id"]
+        site, _ = owner_auth.request_site_verification(self.oid, sid)
+        token = site["verification_token"]
+        owner_auth.requests.get = self._dns_returns([])
+        owner_auth.run_site_verification(self.oid, sid)
+        self.assertEqual(self.fake.rows("widget_sites")[0]["verification_token"], token)
+
+    def test_resolver_is_rate_limited(self):
+        sid = self._site()["id"]
+        owner_auth.request_site_verification(self.oid, sid)
+        calls = []
+
+        def counting_get(url, params=None, timeout=None):
+            calls.append(1)
+            return type("R", (), {"status_code": 200,
+                                  "json": lambda s: {"Answer": []}})()
+        owner_auth.requests.get = counting_get
+        owner_auth.run_site_verification(self.oid, sid)
+        owner_auth.run_site_verification(self.oid, sid)
+        self.assertEqual(len(calls), 1, "the second check should be refused locally")
+
+    # --- scoping ----------------------------------------------------------
+
+    def test_cannot_start_verification_on_another_owners_site(self):
+        site = self._site(owner=self.oid2, domain="beta.example.com")
+        got, err = owner_auth.request_site_verification(self.oid, site["id"])
+        self.assertIsNone(got)
+        self.assertIn("not yours", err)
+        self.assertIsNone(self.fake.rows("widget_sites")[0].get("verification_token"),
+                          "no token may be minted against someone else's domain")
+
+    def test_cannot_run_verification_on_another_owners_site(self):
+        site = self._site(owner=self.oid2, domain="beta.example.com")
+        got, err = owner_auth.run_site_verification(self.oid, site["id"])
+        self.assertIsNone(got)
+        self.assertIn("not yours", err)
+
+    def test_one_owner_cannot_verify_another_owners_domain(self):
+        """Even with the right token in hand, a foreign site_id must not verify."""
+        a = self._site(self.oid, "alpha.example.com")
+        b = self._site(self.oid2, "beta.example.com")
+        owner_auth.request_site_verification(self.oid, a["id"])
+        token = self.fake.rows("widget_sites")[0]["verification_token"]
+        owner_auth.requests.get = self._dns_returns(
+            [{"type": 16, "data": f'"{token}"'}])
+        owner_auth.run_site_verification(self.oid, b["id"])
+        beta = [r for r in self.fake.rows("widget_sites") if r["id"] == b["id"]][0]
+        self.assertNotEqual(beta["verification_status"], "verified")
+
+    # --- owner-facing surface --------------------------------------------
+
+    def test_pending_owner_dashboard_hides_the_snippet(self):
+        self._site()
+        self.c.post("/owner/login", data={"username": "alpha",
+                                          "password": "a-long-enough-pass"})
+        body = self.c.get("/owner/").get_data(as_text=True)
+        self.assertNotIn("widget.js", body)
+        self.assertIn("Verify you control", body)
+
+    def test_verified_owner_dashboard_shows_the_snippet(self):
+        sid = self._site()["id"]
+        owner_auth.set_site_verification(sid, True, "admin")
+        self.c.post("/owner/login", data={"username": "alpha",
+                                          "password": "a-long-enough-pass"})
+        body = self.c.get("/owner/").get_data(as_text=True)
+        self.assertIn("widget.js", body)
+        self.assertNotIn("Verify you control", body)
+
+    def test_dashboard_shows_the_exact_txt_record_to_publish(self):
+        sid = self._site()["id"]
+        site, _ = owner_auth.request_site_verification(self.oid, sid)
+        self.c.post("/owner/login", data={"username": "alpha",
+                                          "password": "a-long-enough-pass"})
+        body = self.c.get("/owner/").get_data(as_text=True)
+        self.assertIn("_netrange.alpha.example.com", body)
+        self.assertIn(site["verification_token"], body)
+
+    def test_verification_routes_require_login_and_csrf(self):
+        sid = self._site()["id"]
+        self.assertEqual(
+            self.c.post(f"/owner/sites/{sid}/verify/start").status_code, 302)
+        self.c.post("/owner/login", data={"username": "alpha",
+                                          "password": "a-long-enough-pass"})
+        self.assertEqual(
+            self.c.post(f"/owner/sites/{sid}/verify/start").status_code, 400)
+        self.c.get("/owner/")
+        # Nothing is published in DNS here, so the check must fail closed.
+        self.assertEqual(
+            self.c.post(f"/owner/sites/{sid}/verify").status_code, 400)
+
+    # --- admin override ---------------------------------------------------
+
+    def test_admin_can_verify_by_hand_for_venues_without_dns_control(self):
+        """A captive-portal vendor may refuse to add a DNS record, so the human
+        decision the whole model rests on also applies to domain control."""
+        sid = self._site()["id"]
+        r = self.c.post(f"/api/sites/{sid}/verification",
+                        data={"decision": "verified", "by": "admin"},
+                        headers={"X-Netrange-Admin": "1",
+                                 "Authorization": self._basic()})
+        self.assertEqual(r.status_code, 200, r.get_data(as_text=True))
+        self.assertEqual(r.get_json()["verification_status"], "verified")
+        self.assertIsNotNone(owner_auth.site_for_domain("alpha.example.com"),
+                             "hand verification must actually unlock collection")
+
+    def test_admin_can_unverify(self):
+        sid = self._site()["id"]
+        owner_auth.set_site_verification(sid, True, "admin")
+        r = self.c.post(f"/api/sites/{sid}/verification",
+                        data={"decision": "unverified"},
+                        headers={"X-Netrange-Admin": "1",
+                                 "Authorization": self._basic()})
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(owner_auth.site_for_domain("alpha.example.com"),
+                          "revoking must stop collection immediately")
+
+    def test_admin_verification_needs_both_auth_and_the_header(self):
+        sid = self._site()["id"]
+        url = f"/api/sites/{sid}/verification"
+        no_auth = self.c.post(url, data={"decision": "verified"},
+                              headers={"X-Netrange-Admin": "1"})
+        self.assertEqual(no_auth.status_code, 401)
+        no_header = self.c.post(url, data={"decision": "verified"},
+                                headers={"Authorization": self._basic()})
+        self.assertEqual(no_header.status_code, 400)
+        wrong = self.c.post(url, data={"decision": "verified"},
+                            headers={"X-Netrange-Admin": "1",
+                                     "Authorization": _b64("admin", "wrong")})
+        self.assertEqual(wrong.status_code, 401)
+
+    def test_admin_verification_rejects_a_nonsense_decision(self):
+        sid = self._site()["id"]
+        r = self.c.post(f"/api/sites/{sid}/verification",
+                        data={"decision": "maybe"},
+                        headers={"X-Netrange-Admin": "1",
+                                 "Authorization": self._basic()})
+        self.assertEqual(r.status_code, 400)
+        self.assertIsNone(owner_auth.site_for_domain("alpha.example.com"),
+                          "an invalid decision must not verify anything")
+
+    def test_admin_verification_of_unknown_site_is_404(self):
+        r = self.c.post("/api/sites/9999/verification",
+                        data={"decision": "verified"},
+                        headers={"X-Netrange-Admin": "1",
+                                 "Authorization": self._basic()})
+        self.assertEqual(r.status_code, 404)

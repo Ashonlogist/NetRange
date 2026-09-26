@@ -7,8 +7,11 @@ This is deliberately a SEPARATE identity system from the admin dashboard.
   * The admin dashboard (app.py `_check_dashboard_auth`) is HTTP Basic with
     DASHBOARD_USERNAME / DASHBOARD_PASSWORD over every /dashboard* route. It is
     not session-based and not user-facing.
-  * These accounts are self-serve, password-only, session-based, and scoped to
-    a single owner's own rows.
+  * These accounts are password-only, session-based, and scoped to a single
+    owner's own rows. They are not self-serve: an account records interest and
+    is unapproved until a person approves it, because whether NetRange reports
+    a venue's coverage for free or for a fee depends on the scale of the
+    network.
 
 They do not share a signing key, a password store, or a guard function. A
 flaw in owner auth must not be able to reach the admin dashboard, and rotating
@@ -42,6 +45,8 @@ import time
 from functools import wraps
 from hashlib import sha256
 from urllib.parse import urlsplit
+
+import requests
 
 from datetime import datetime, timezone
 
@@ -339,8 +344,29 @@ def owner_sites(owner_id: int) -> list[dict]:
 
 
 def site_for_domain(domain: str) -> dict | None:
-    client = get_client()
-    resp = client.table("widget_sites").select("*").eq("domain", domain).limit(1).execute()
+    """
+    The site a widget scan may be attributed to -- VERIFIED ones only.
+
+    This is the enforcement point for domain ownership, and it is the reason
+    registering a domain is not the same as being able to collect from it. An
+    unverified or failed site is invisible here, so the widget endpoint cannot
+    be made to accept one by any other route.
+
+    An unverified domain gets "unregistered origin", the same answer as a domain
+    nobody claimed. It does not confirm that the site exists.
+    """
+    resp = (
+        get_client().table("widget_sites").select("*")
+        .eq("domain", domain).eq("verification_status", "verified")
+        .limit(1).execute()
+    )
+    return (resp.data or [None])[0]
+
+
+def site_for_domain_any_status(domain: str) -> dict | None:
+    """Unfiltered lookup, for the owner's own dashboard and for admin. Never
+    call this from a path that collects or attributes data."""
+    resp = get_client().table("widget_sites").select("*").eq("domain", domain).limit(1).execute()
     return (resp.data or [None])[0]
 
 
@@ -362,6 +388,9 @@ def register_site(owner_id: int, domain: str, label: str) -> tuple[dict | None, 
     try:
         resp = client.table("widget_sites").insert({
             "owner_id": owner_id, "domain": domain, "label": label,
+            # Explicit, not left to the column DEFAULT: registering a domain
+            # must never be mistaken for being allowed to collect from it.
+            "verification_status": "pending",
         }).execute()
     except Exception:
         return None, "Could not register that domain."
@@ -478,3 +507,172 @@ def pending_owners() -> list[dict]:
         .execute()
     )
     return resp.data or []
+
+
+# ---------------------------------------------------------------------------
+# Domain ownership verification
+# ---------------------------------------------------------------------------
+# Approval answers "is this person a real venue?". It does not answer "does this
+# person control example.com?" An approved owner could otherwise register any
+# domain and collect its traffic -- a competitor's included -- and under a
+# per-venue pricing model that is not a nuisance bug, it is the core promise
+# failing.
+#
+# Proof is a DNS TXT record holding an unguessable per-site token. Adding one
+# requires control of the domain's DNS, which is exactly the claim being made.
+#
+# The resolver is DNS-over-HTTPS rather than UDP/53 because cloud PaaS commonly
+# blocks outbound port 53, and DoH needs no new dependency. Google is used
+# because it returns plain JSON with no Accept negotiation.
+
+SITE_VERIFICATION_PREFIX = "_netrange"
+SITE_VERIFICATION_TTL = 300          # seconds; a DNS change takes time to settle
+_DOH_ENDPOINT = "https://dns.google/resolve"
+_VERIFY_COOLDOWN = 20                # seconds between DNS checks for one site
+_verify_last_check: dict[int, float] = {}
+
+
+def verification_txt_name(domain: str) -> str:
+    """
+    The name a venue must publish the token at.
+
+    Always a fixed prefix under the domain, including for an apex domain. Using
+    the apex directly would force a second, differently-shaped instruction for
+    the most common case, and a fixed child name keeps the published token out
+    of the record a domain's SPF/DKIM policy lives in.
+    """
+    return f"{SITE_VERIFICATION_PREFIX}.{domain}"
+
+
+def new_verification_token() -> str:
+    """32 chars of entropy. Short enough to paste into a DNS panel, long enough
+    that guessing one is not a way to claim someone else's domain."""
+    return secrets.token_urlsafe(24)
+
+
+def check_dns_txt(name: str, token: str) -> bool:
+    """
+    True if `name` publishes a TXT record containing `token`.
+
+    Returns False on ANY error -- resolver down, malformed JSON, timeout. The
+    caller treats False as "not verified yet" and says so; it must never be
+    read as "verified".
+    """
+    # "_" is legal in a DNS label and our own prefix uses it, so excluding it
+    # here would reject every name this function generates.
+    if not re.fullmatch(r"[a-z0-9_.-]{1,253}", name or ""):
+        return False
+    try:
+        resp = requests.get(
+            _DOH_ENDPOINT,
+            params={"name": name, "type": "TXT", "cd": "false"},
+            timeout=5,
+        )
+        if resp.status_code != 200:
+            return False
+        answers = (resp.json() or {}).get("Answer") or []
+    except Exception:
+        # A resolver we cannot reach is a failed check, not a pass.
+        return False
+
+    for a in answers:
+        if not isinstance(a, dict) or a.get("type") != 16:
+            continue
+        for chunk in re.findall(r'"((?:[^"\\]|\\.)*)"', str(a.get("data", ""))):
+            if hmac.compare_digest(chunk.strip(), token):
+                return True
+    return False
+
+
+def request_site_verification(owner_id: int, site_id: int) -> tuple[dict | None, str | None]:
+    """
+    Mint (or re-mint) the token for one of THIS owner's sites and return the
+    instructions to publish it.
+
+    Scoped by owner_id in the update itself: a site_id belonging to someone else
+    must update zero rows, never reissue a token against another venue's domain.
+    """
+    token = new_verification_token()
+    try:
+        resp = (
+            get_client().table("widget_sites")
+            .update({
+                "verification_token": token,
+                "verification_status": "pending",
+                "verification_method": None,
+                "verified_at": None,
+                "verified_by": None,
+            })
+            .eq("id", site_id)
+            .eq("owner_id", owner_id)          # <- the scoping that matters
+            .execute()
+        )
+    except Exception:
+        return None, "Could not start verification."
+    if not (resp.data or None):
+        return None, "That site is not yours."
+    return resp.data[0], None
+
+
+def run_site_verification(owner_id: int, site_id: int) -> tuple[dict | None, str | None]:
+    """
+    Look up the token the owner was given and see if it is published.
+
+    Returns the site on success. On a mismatch the token is kept, because the
+    usual cause is a typo or DNS that has not propagated yet, and the owner
+    needs to retry the same token rather than be handed a new one each time.
+    """
+    site = _owned_site(owner_id, site_id)
+    if not site:
+        return None, "That site is not yours."
+    if site.get("verification_status") == "verified":
+        return site, None
+
+    # The resolver is the only outbound call an owner can aim at will, so it is
+    # the thing worth rate limiting. Minting a token costs nothing and stays free.
+    if time.time() - _verify_last_check.get(site_id, 0) < _VERIFY_COOLDOWN:
+        return None, "Wait a few seconds before checking again."
+    _verify_last_check[site_id] = time.time()
+
+    token = site.get("verification_token")
+    if not token:
+        return None, "Start verification first."
+
+    if not check_dns_txt(verification_txt_name(site["domain"]), token):
+        return None, (
+            f"No matching TXT record at {verification_txt_name(site['domain'])} yet. "
+            "DNS can take a few minutes to propagate."
+        )
+    return set_site_verification(site_id, True, "owner-dns", token=token), None
+
+
+def set_site_verification(site_id: int, verified: bool, by: str,
+                          token: str | None = None) -> dict | None:
+    """
+    Record a verification decision.
+
+    The token is cleared on success: it has done its job, and a live token
+    sitting in the table is a credential-shaped string with no reason to exist.
+    On failure it is kept so the owner can retry with the same value.
+    """
+    patch = {
+        "verification_status": "verified" if verified else "failed",
+        "verification_method": by,
+        "verified_at": _now() if verified else None,
+        "verified_by": by if verified else None,
+    }
+    if verified:
+        patch["verification_token"] = None
+    resp = (
+        get_client().table("widget_sites").update(patch)
+        .eq("id", site_id).execute()
+    )
+    return (resp.data or [None])[0]
+
+
+def _owned_site(owner_id: int, site_id: int) -> dict | None:
+    resp = (
+        get_client().table("widget_sites").select("*")
+        .eq("id", site_id).eq("owner_id", owner_id).limit(1).execute()
+    )
+    return (resp.data or [None])[0]

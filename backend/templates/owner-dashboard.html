@@ -95,17 +95,45 @@ footer a{color:var(--dim)}
                 <h2 style="margin:0">{{ site.label or site.domain }}</h2>
                 <p class="faint small mono" style="margin-top:4px">{{ site.domain }}</p>
             </div>
-            {% if site.sms_reporting_enabled %}
+            {% if site.verification_status != 'verified' %}
+                <span class="tag off">Not verified</span>
+            {% elif site.sms_reporting_enabled %}
                 <span class="tag">SMS reporting on</span>
             {% else %}
                 <span class="tag off">SMS reporting off</span>
             {% endif %}
         </div>
 
+        {% if site.verification_status != 'verified' %}
+        <h2 style="margin-top:20px">Verify you control {{ site.domain }}</h2>
+        <p class="small muted">Until this is done the widget on
+            <span class="mono">{{ site.domain }}</span> collects nothing, and the server
+            refuses reports from it. That is deliberate: it stops any approved account
+            from registering someone else's domain and receiving their visitors'
+            data.</p>
+        {% if site.verification_token %}
+            <p class="small">Add this TXT record in your DNS zone, then check again.
+                DNS changes can take a few minutes to appear.</p>
+            <pre>{{ verification_txt_name(site.domain) }}  TXT  "{{ site.verification_token }}"</pre>
+            <form method="post" action="/owner/sites/{{ site.id }}/verify">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn">Check DNS now</button>
+            </form>
+        {% else %}
+            <form method="post" action="/owner/sites/{{ site.id }}/verify/start">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn">Start verification</button>
+            </form>
+        {% endif %}
+        <p class="faint small">You need DNS control of the domain to do this. If your
+            network is run by a provider who will not add a record, email
+            netrange@ashonlogist.website and it can be verified by hand.</p>
+        {% else %}
         <label style="margin-top:20px">Embed this on {{ site.domain }}</label>
         <pre>&lt;script src="{{ widget_js_url }}" async&gt;&lt;/script&gt;</pre>
         <p class="faint small">Put it anywhere in your page. Visitors see a one-time consent
             prompt; nothing is sent unless they tap Allow.</p>
+        {% endif %}
 
         <h2>Reported coverage</h2>
         {% if stats[site.id] and stats[site.id].cells %}

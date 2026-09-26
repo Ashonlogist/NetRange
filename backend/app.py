@@ -26,6 +26,8 @@ from owner_auth import (OWNER_SESSION_KEY, check_csrf, client_ip, create_owner,
                         owner_approved, pending_owners, pending_requests,
                         require_approval, set_approval,
                         owner_required, owner_sites, register_site, site_for_domain,
+                        request_site_verification, run_site_verification,
+                        set_site_verification, verification_txt_name,
                         verify_login, widget_throttled)
 
 app = Flask(__name__)
@@ -89,6 +91,7 @@ def _require_admin_header(fn):
 # closed at check_csrf() -- correct, but as a confusing 400 on a public page
 # rather than an obvious mistake in review.
 app.jinja_env.globals["csrf_token"] = csrf_token
+app.jinja_env.globals["verification_txt_name"] = verification_txt_name
 
 def _required_env(name):
     """Read an environment variable that has no safe default.
@@ -1336,6 +1339,31 @@ def decide_request(req_id):
     return jsonify({"ok": True, "id": req_id, "status": decision})
 
 
+@app.route("/api/sites/<int:site_id>/verification", methods=["POST"])
+@_require_admin_header
+def decide_site_verification(site_id):
+    """
+    Verify or un-verify a domain by hand.
+
+    DNS verification is the default, but a venue whose network is run by a
+    captive-portal vendor may not be able to add a record. This is the same
+    manual, human decision the whole approval model rests on, applied to the
+    narrower question of domain control.
+    """
+    auth = _check_dashboard_auth()
+    if auth:
+        return auth
+    decision = (request.form.get("decision") or "").strip()
+    if decision not in ("verified", "unverified"):
+        return jsonify({"error": "decision must be verified or unverified"}), 400
+    site = set_site_verification(site_id, decision == "verified",
+                                 request.form.get("by") or "admin")
+    if not site:
+        return jsonify({"error": "no such site"}), 404
+    return jsonify({"ok": True, "id": site_id,
+                    "verification_status": site.get("verification_status")})
+
+
 @app.route("/api/owners/<int:owner_id>/approval", methods=["POST"])
 @_require_admin_header
 def decide_owner(owner_id):
@@ -1418,6 +1446,32 @@ def owner_dashboard():
 def owner_add_site():
     check_csrf()
     site, error = register_site(g.owner_id, request.form.get("domain"), request.form.get("label"))
+    if error:
+        return render_template("owner-dashboard.html", sites=owner_sites(g.owner_id),
+                               csrf=csrf_token(), error=error), 400
+    return redirect("/owner/")
+
+
+@app.route("/owner/sites/<int:site_id>/verify/start", methods=["POST"])
+@owner_required
+@require_approval
+def owner_start_verification(site_id):
+    """Mint the TXT token for one of THIS owner's sites."""
+    check_csrf()
+    site, error = request_site_verification(g.owner_id, site_id)
+    if error:
+        return render_template("owner-dashboard.html", sites=owner_sites(g.owner_id),
+                               csrf=csrf_token(), error=error), 400
+    return redirect("/owner/")
+
+
+@app.route("/owner/sites/<int:site_id>/verify", methods=["POST"])
+@owner_required
+@require_approval
+def owner_run_verification(site_id):
+    """Look up the published token and mark the site verified if it matches."""
+    check_csrf()
+    _, error = run_site_verification(g.owner_id, site_id)
     if error:
         return render_template("owner-dashboard.html", sites=owner_sites(g.owner_id),
                                csrf=csrf_token(), error=error), 400
