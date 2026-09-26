@@ -108,6 +108,25 @@ blast radius is a junk session, not a data leak, because:
 - sessions expire after 30 minutes of inactivity;
 - output is suppression-gated before anything is visible.
 
+#### SMS attribution — carrier is not a location
+
+`attribute_site()` decides which owner's dashboard a report belongs on. It
+requires **both** a carrier match and coordinates that fall in the same
+analytics cell as a registered site:
+
+- **No coordinates → no attribution.** The report still feeds the
+  network-wide aggregate. This is the common case, because forward geocoding
+  is off by default (see section 6).
+- **Coordinates that no registered site covers → no attribution.**
+- **A site with no `lat`/`lon` cannot be attributed to at all**, so a venue is
+  never shown traffic for a location it did not describe.
+
+Matching on carrier name alone would have been wrong: a venue registering
+"MTN" would have received every MTN report in the country, including its
+competitors' venues and every road outside its own walls, presented on its
+dashboard as its own. Under-attributing costs a quieter dashboard;
+over-attributing hands a business its competitor's complaints.
+
 ---
 
 ## 3. Where k-anonymity suppression is enforced
@@ -217,7 +236,55 @@ public coverage. Deletion is handled by request, not by a self-serve toggle.
 
 ---
 
-## 6. Not yet live
+## 6. How a venue gets access — it is not self-serve
+
+Coverage reporting is a relationship, not a signup. A venue wants to know about
+dead spots on its own WiFi; whether NetRange does that for free or for a fee
+depends on the scale of the network, and that is a conversation, not a button.
+
+**The path:**
+
+1. `/get-access` shows an intent form. It writes a row to `venue_requests` and
+   renders a prefilled email to `netrange@ashonlogist.website`. Scale is
+   captured up front because free-vs-billed turns on it.
+2. A person reads the request and decides. `/api/access-requests/<id>` records
+   `approved` / `declined` with a note.
+3. If the venue also registered an account via `/owner/register`, that account
+   is **unapproved** and a person approves it separately via
+   `/api/owners/<id>/approval`. Approving a request does not approve an
+   account; the two are separate events.
+
+**Creating an account and collecting data are separate events.** An account
+records interest. It does not grant a collector.
+
+**Enforcement is at the endpoint, not in the template.** Adding a domain and
+toggling SMS reporting are both wrapped in `require_approval`, and the
+dashboard withholds the snippet, so a pending owner cannot obtain a live
+collector by ignoring the UI. A pending owner gets `owner-pending.html` and a
+`403` on state changes.
+
+**There is no self-service approval**, on purpose. If a venue could approve
+itself the gate would be decorative.
+
+**Auth for the admin API.** The decision routes use HTTP Basic auth
+(`DASHBOARD_SECRET`) *and* require `X-Netrange-Admin: 1`. Basic auth alone is
+not enough: a browser re-sends cached Basic credentials to the same origin even
+from a page on another site, and an `owner_id` is a small sequential integer,
+so a plain cross-site form POST could otherwise approve an arbitrary account.
+A form cannot set a custom header, and a `fetch()` that tries triggers a CORS
+preflight that fails for unlisted origins. Session CSRF is unchanged for owner
+routes, where a session actually exists.
+
+**CORS is scoped, not global.** Only `/api/widget-scan` and `/api/sms/inbound`
+are cross-origin (`origins="*"`); every other route gets no CORS headers.
+`allow_credentials` is off everywhere, which is what stops a browser attaching
+Basic credentials or cookies cross-origin. The widget endpoint independently
+checks `Origin` against registered domains, so the allowlist is the second
+layer, not the only one.
+
+---
+
+## 7. Not yet live
 
 - **Africa's Talking is not connected.** No credentials are configured and no
   real webhook payload has been observed, so the exact field names are
@@ -231,7 +298,21 @@ public coverage. Deletion is handled by request, not by a self-serve toggle.
   third-party API is a disclosure the consent prompt does not mention. Without
   it, SMS reports store the raw text and still feed carrier/frustration
   aggregates.
-- **`network_owners`, `widget_sites`, `sms_sessions`, `sms_reports`** and the new
-  `scans` columns are defined in `db/schema_data_sources.sql`, which must be
-  run once in Supabase. It is separate from `db/schema.sql` and is not optional.
+- **The schema is live.** `db/schema_data_sources.sql` has been applied to
+  Supabase, including `venue_requests`, the `network_owners.approved_at` /
+  `approved_by` / `decision_note` columns, and `widget_sites.lat` / `lon`. The
+  script is idempotent, so re-running it is safe. It remains separate from
+  `db/schema.sql`.
+- **Domain ownership is not proven.** An approved owner can register *any*
+  domain and will receive that domain's widget traffic. There is no DNS TXT or
+  file-placement check, so an approved venue could claim a competitor's domain.
+  This is the weakest remaining control and should be closed before the service
+  is offered commercially — see the note at the end of this file.
+- **The add-site form does not collect `lat`/`lon` or `sms_carrier` yet**, so a
+  freshly registered site is not eligible for SMS attribution and cannot have
+  SMS reporting enabled meaningfully. Both columns exist; only the UI is
+  missing.
+- **No email is sent server-side.** The intent flow records the row and hands
+  the visitor a prefilled `mailto:`; there is no SMTP configuration. If a venue
+  closes the mail client, the request is still in `venue_requests`.
 - Required env vars, none with defaults: `OWNER_SESSION_SECRET`, `SMS_PHONE_PEPPER`.
