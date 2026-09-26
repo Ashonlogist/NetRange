@@ -115,8 +115,8 @@ requires **both** a carrier match and coordinates that fall in the same
 analytics cell as a registered site:
 
 - **No coordinates → no attribution.** The report still feeds the
-  network-wide aggregate. This is the common case, because forward geocoding
-  is off by default (see section 6).
+  network-wide aggregate. A place name the offline table does not know
+  resolves to nothing, and the raw text is kept.
 - **Coordinates that no registered site covers → no attribution.**
 - **A site with no `lat`/`lon` cannot be attributed to at all**, so a venue is
   never shown traffic for a location it did not describe.
@@ -291,13 +291,28 @@ layer, not the only one.
   unverified. `sms_reports.parse_inbound()` accepts several common spellings and
   `WEBHOOK_FIELD_MAP` is the single place to correct them. Set `AT_API_KEY` /
   `AT_SHORTCODE` and deploy before pointing the number at a user.
-- **Forward geocoding is off by default.** `backend/geocoding.py` is a
-  *reverse* geocoder — an offline table mapping lat/lon to Ghanaian place names
-  — so given free text it has nothing to return. Forward geocoding is opt-in via
-  `SMS_FORWARD_GEOCODER_URL`, because forwarding a person's location text to a
-  third-party API is a disclosure the consent prompt does not mention. Without
-  it, SMS reports store the raw text and still feed carrier/frustration
-  aggregates.
+- **SMS locations are resolved offline.** `geocoding.forward_geocode()` reads
+  `_GHANA_PLACES` backwards, so a name in the table becomes a neighbourhood
+  centroid with no network call and no third party. Someone naming a
+  neighbourhood is naming a place, not a position, and the centroid is only used
+  to pick the cell a report falls in — it is never published as that person's
+  location. Names outside the table resolve to nothing and the report is stored
+  unattributed. `SMS_FORWARD_GEOCODER_URL` remains an opt-in fallback for
+  anything the table misses; it is off by default because it would forward a
+  person's location text to another company, which the consent prompt does not
+  mention. **Aliases only** (`KNUST`, `UG`, `UCC`, and the components of
+  slash-separated names) were added to the name index — no new rectangles,
+  because `_GHANA_PLACES` is read both ways and a new rectangle would silently
+  relabel coordinates already published on the map.
+- **Outbound SMS still needs credentials.** `AT_API_KEY` / `AT_SHORTCODE` are
+  read by nothing yet: replies are generated and returned as JSON, not sent.
+  `GET /api/integrations` reports what is actually configured, including the
+  exact webhook URL to paste into the Africa's Talking console.
+- **`isActive` is honoured.** Delivery reports go to the same callback URL,
+  carry a sender number and no text, and were parsing as inbound messages with
+  empty text — opening a junk session that then sat for 30 minutes. A payload
+  with no `isActive` is treated as inbound, which is the conservative direction:
+  rejecting an unlabelled payload would drop real reports.
 - **The schema is live.** `db/schema_data_sources.sql` has been applied to
   Supabase, including `venue_requests`, the `network_owners.approved_at` /
   `approved_by` / `decision_note` columns, and `widget_sites.lat` / `lon`. The
@@ -305,10 +320,14 @@ layer, not the only one.
   `db/schema.sql`.
 - **A site must be verified before it collects anything.** Registering a domain
   is not permission to collect from it. See section 8.
-- **The add-site form does not collect `lat`/`lon` or `sms_carrier` yet**, so a
-  freshly registered site is not eligible for SMS attribution and cannot have
-  SMS reporting enabled meaningfully. Both columns exist; only the UI is
-  missing.
+- **The add-site form collects `lat`/`lon` and `sms_carrier`.** `parse_location_input()`
+  accepts a coordinate pair or a Google Maps / OpenStreetMap link, because a
+  venue manager knows their venue, not their latitude, and a link is what they
+  have to hand. Google's `/place/` form emits `!4d<lon>` *before* `!3d<lat>`
+  while other forms emit the reverse, so both orders are handled. Enabling SMS
+  reporting requires both a location and a carrier and says why if they are
+  missing: "enabled" but unable to attribute anything is indistinguishable from
+  having no reports. Turning it **off** is never blocked.
 - **No email is sent server-side.** The intent flow records the row and hands
   the visitor a prefilled `mailto:`; there is no SMTP configuration. If a venue
   closes the mail client, the request is still in `venue_requests`.
