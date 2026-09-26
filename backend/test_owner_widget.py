@@ -18,6 +18,8 @@ The stub client honours .eq() filters, so a scoping bug shows up as a test
 failure rather than passing silently.
 """
 
+import pathlib
+import re
 import unittest
 
 import tests_env  # noqa: F401  (must precede `import app`)
@@ -25,6 +27,7 @@ import tests_env  # noqa: F401  (must precede `import app`)
 import app as appmod  # noqa: E402
 import db  # noqa: E402
 import owner_auth  # noqa: E402
+from analytics import MIN_DEVICES_PER_CELL  # noqa: E402
 from test_sms_reports import _Db  # noqa: E402
 
 
@@ -301,3 +304,97 @@ class WidgetScanTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# --------------------------------------------------------------------------
+# The consent notice, pinned verbatim.
+# --------------------------------------------------------------------------
+# The wording is the agreement. These tests reconstruct the string the browser
+# will actually render and compare it to the required copy character by
+# character, so a "harmless" reword during a refactor fails the build instead of
+# quietly changing what a visitor consents to.
+
+STATIC_WIDGET = pathlib.Path(__file__).resolve().parent / "static" / "widget.js"
+
+REQUIRED_CONSENT = (
+    "We'd like to collect anonymous network quality data from this page to help "
+    "improve coverage maps.\n"
+    "\n"
+    "Your data is only shown if at least 3 other people from this area also "
+    "reported. Nothing is linked to you.\n"
+    "\n"
+    "This is optional and anonymous. No account, no personal details, no cookies. "
+    "You can change your mind anytime \u2014 the data is only collected once per visit."
+)
+
+
+def _strip_js_comments(src):
+    """Remove // and /* */ comments so prose about a rule cannot satisfy a
+    test that the rule's code obeys it."""
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+    return re.sub(r"(?m)^\s*//.*$", "", src)
+
+
+def _rendered_consent():
+    """Evaluate widget.js's CONSENT array exactly as the browser would."""
+    src = pathlib.Path(STATIC_WIDGET).read_text()
+    start = src.index("var CONSENT = [")
+    end = src.index("].join(", start)
+    body = src[start + len("var CONSENT = ["):end]
+    out = []
+    for m in re.finditer(r"'((?:[^'\\]|\\.)*)'|\"((?:[^\"\\]|\\.)*)\"", body):
+        raw = m.group(1) if m.group(1) is not None else m.group(2)
+        raw = raw.replace("\\'", "'").replace('\\"', '"')
+        # both JS escape forms: \uXXXX and \u{XXXXX}
+        raw = re.sub(r"\\u\{([0-9a-fA-F]+)\}",
+                     lambda m: chr(int(m.group(1), 16)), raw)
+        raw = re.sub(r"\\u([0-9a-fA-F]{4})",
+                     lambda m: chr(int(m.group(1), 16)), raw)
+        out.append(raw)
+    return "\n".join(out)
+
+
+class TestConsentCopy(unittest.TestCase):
+    def test_consent_copy_is_verbatim(self):
+        self.assertEqual(_rendered_consent(), REQUIRED_CONSENT)
+
+    def test_copy_states_the_threshold_we_actually_enforce(self):
+        self.assertIn(f"at least {MIN_DEVICES_PER_CELL} other people", _rendered_consent())
+
+    def test_copy_states_no_cookies(self):
+        self.assertIn("no cookies", _rendered_consent().lower())
+
+    def test_copy_states_nothing_is_linked_to_the_person(self):
+        self.assertIn("Nothing is linked to you", _rendered_consent())
+
+    def test_no_fingerprinting_code(self):
+        code = _strip_js_comments(pathlib.Path(STATIC_WIDGET).read_text())
+        for banned in ("canvas", "toDataURL", "getContext", "AudioContext",
+                       "deviceMemory", "hardwareConcurrency", "fonts.check"):
+            self.assertNotIn(banned, code, f"{banned} must not appear in widget code")
+
+    def test_nothing_is_sent_before_allow(self):
+        """
+        Structural check: the only place a request is issued is inside
+        collectAndSend(), and the only caller is the Allow handler. The decline
+        handler must not reach it.
+        """
+        code = _strip_js_comments(pathlib.Path(STATIC_WIDGET).read_text())
+        senders = [m for m in re.finditer(r"function (collectAndSend|send|onAllow|onDecline)", code)]
+        names = [m.group(1) for m in senders]
+        self.assertIn("collectAndSend", names)
+        self.assertIn("onAllow", names)
+        self.assertIn("onDecline", names)
+        # collectAndSend is invoked exactly once, from the Allow closure
+        # (the "function collectAndSend(prompt)" definition is not a call site)
+        sites = [m for m in re.finditer(r"(?<!function )collectAndSend\(prompt\)", code)]
+        self.assertEqual(len(sites), 1)
+        call = sites[0].start()
+        allow_at = code.index("function onAllow")
+        decline_at = code.index("function onDecline")
+        self.assertGreater(call, allow_at)
+        self.assertLess(call, decline_at)
+        # the decline handler only tears the prompt down
+        decline_body = code[decline_at:decline_at + 220]
+        for banned in ("collectAndSend", "send(", "fetch", "beacon"):
+            self.assertNotIn(banned, decline_body)

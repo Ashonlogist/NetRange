@@ -45,21 +45,21 @@
     return '/api/widget-scan';
   })();
 
+  // Verbatim consent copy. Do not reword, reformat, or "improve" this.
+  //
+  // The wording is the notice, and paraphrasing it changes what a visitor is
+  // agreeing to. "3 other people from this area", "Nothing is linked to you",
+  // and "no cookies" are each a specific, checkable claim. A softer rewording
+  // ("combined with other visitors' data", "we never store anything that
+  // identifies you individually") is not the same promise to the person
+  // deciding, and the k-anonymity gate and no-cookie behaviour are exactly
+  // what makes the original wording true.
   var CONSENT = [
-    '\u{1F4F6} Help map network coverage here?',
+    "We'd like to collect anonymous network quality data from this page to help improve coverage maps.",
     '',
-    'This site is checking your connection quality to improve coverage data',
-    "for this network. We'd like to record:",
+    'Your data is only shown if at least 3 other people from this area also reported. Nothing is linked to you.',
     '',
-    '  \u2022 Your approximate location (if you allow it)',
-    '  \u2022 Your connection type and speed (from your browser \u2014 no app needed)',
-    '  \u2022 The time of this visit',
-    '',
-    "This is anonymous and combined with other visitors' data \u2014 we never",
-    'store anything that identifies you individually.',
-    '',
-    'You can change your mind anytime \u2014 this only happens once per visit,',
-    'and only if you tap Allow.'
+    'This is optional and anonymous. No account, no personal details, no cookies. You can change your mind anytime \u2014 the data is only collected once per visit.'
   ].join('\n');
 
   var session = { decided: false, sent: false };
