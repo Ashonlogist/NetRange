@@ -19,3 +19,4 @@ node_modules/
 # telephony module -- the config committed, the module it points at did not.
 /android/
 backend/static/netrange.apk
+builds/
